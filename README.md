@@ -22,9 +22,9 @@ O bot é capaz de:
 
 ```mermaid
 flowchart TD
-    A[Usuário - Telegram] -->|Mensagens| B[Bot Telegram API]
-    B -->|Requisição| C[Servidor Node.js (Express)]
+    A[Usuario - Telegram] -->|Mensagens| B[Bot Telegram API]
+    B -->|Requisicao| C[Servidor Spring Boot - FitJourneyAI]
     C -->|Prompt| D[OpenAI API]
     D -->|Resposta inteligente| C
     C -->|Mensagem formatada| B
-    B -->|Retorno ao usuário| A
+    B -->|Retorno ao usuario| A

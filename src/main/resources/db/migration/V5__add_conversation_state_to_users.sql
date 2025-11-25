@@ -1,0 +1,5 @@
+ALTER TABLE users
+    ADD COLUMN current_flow VARCHAR(40);
+
+ALTER TABLE users
+    ADD COLUMN current_step INTEGER;

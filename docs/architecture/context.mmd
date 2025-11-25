@@ -1,0 +1,20 @@
+flowchart LR
+  %% FitJourneyAI - Diagrama de Contexto (C4-1)
+
+  user[Usuario do Telegram]
+  tg[Telegram Bot API]
+  oai[OpenAI API]
+  db[(PostgreSQL)]
+
+  subgraph System["FitJourneyAI - Aplicacao Spring Boot"]
+    app[Servidor Backend]
+  end
+
+  user --> tg --> app
+  app --> oai
+  app --> db
+
+  classDef ext fill:#eef,stroke:#88a,stroke-width:1px;
+  class tg,oai,db,user ext;
+  classDef sys fill:#e8ffe8,stroke:#5a5,stroke-width:1.2px;
+  class app sys;

@@ -1,0 +1,39 @@
+flowchart TB
+  %% FitJourneyAI - Diagrama de Contêiner (C4-2)
+
+  subgraph Cliente
+    user[Usuario - Telegram]
+  end
+
+  subgraph Externos
+    tg[Telegram Bot API]
+    oai[OpenAI API]
+  end
+
+  subgraph Infraestrutura
+    db[(PostgreSQL - Banco de Dados)]
+  end
+
+  subgraph App["Aplicacao FitJourneyAI - Spring Boot"]
+    controller[WebhookController]
+    orchestrator[MessageOrchestrator]
+    service[TelegramService]
+    aiService[OpenAiService]
+    repo[Repositorios - JPA]
+  end
+
+  %% Fluxos principais
+  user --> tg
+  tg --> controller
+  controller --> orchestrator
+  orchestrator --> aiService
+  orchestrator --> repo
+  orchestrator --> service
+  repo --> db
+  aiService --> oai
+  service --> tg
+
+  classDef app fill:#e8ffe8,stroke:#5a5,stroke-width:1.2px;
+  classDef ext fill:#eef,stroke:#88a,stroke-width:1px;
+  class tg,oai,db ext;
+  class controller,orchestrator,service,aiService,repo app;

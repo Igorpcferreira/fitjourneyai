@@ -6,8 +6,8 @@ services:
     container_name: fitjourneyai_db
     restart: always
     environment:
-      POSTGRES_USER: fitjourney
-      POSTGRES_PASSWORD: fitjourney
+      POSTGRES_USER: fitjourneyai
+      POSTGRES_PASSWORD: fitjourneyai
       POSTGRES_DB: fitjourneyai
     ports:
       - "5432:5432"

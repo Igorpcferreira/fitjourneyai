@@ -1,28 +1,44 @@
+server:
+  port: 8080
+
 spring:
   application:
     name: fitjourneyai
 
+  config:
+    import: optional:file:.env[.properties]
+
   datasource:
-    url: jdbc:postgresql://localhost:5432/fitjourneyai
-    username: fitjourney
-    password: fitjourney
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/fitjourneyai}
+    username: ${DATABASE_USER:fitjourneyai}
+    password: ${DATABASE_PASS:fitjourneyai}
+    driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none
+    show-sql: false
     properties:
       hibernate:
         format_sql: true
-        show_sql: true
+
   flyway:
     enabled: true
     locations: classpath:db/migration
-
-server:
-  port: 8080
+    baseline-on-migrate: true
 
 telegram:
-  bot:
-    token: ${TELEGRAM_BOT_TOKEN}
+  bot-token: ${TELEGRAM_BOT_TOKEN:change-me}
+  base-url: https://api.telegram.org
+  webhook-path: /telegram/webhook
+
 openai:
-  api:
-    key: ${OPENAI_API_KEY}
+  api-key: ${OPENAI_API_KEY:change-me}
+  base-url: https://api.openai.com/v1
+  model: gpt-4.1-mini
+
+logging:
+  level:
+    br.edu.puc.fitjourneyai: INFO
+    # Para ver chamadas HTTP, subir esse nível:
+    # org.springframework.web.client.RestTemplate: DEBUG

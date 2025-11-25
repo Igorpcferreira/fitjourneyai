@@ -1,0 +1,39 @@
+flowchart LR
+  %% FitJourneyAI - Diagrama de Componentes (C4-3)
+
+  subgraph Web["Camada Web"]
+    webhook[WebhookController]
+  end
+
+  subgraph Core["Nucleo de Negocio"]
+    orchestrator[MessageOrchestrator]
+    telegramSvc[TelegramService]
+    openAiSvc[OpenAiService]
+  end
+
+  subgraph Persistence["Persistencia"]
+    userRepo[UserRepository]
+    messageRepo[MessageRepository]
+    measurementRepo[MeasurementRepository]
+    workoutRepo[WorkoutRepository]
+  end
+
+  subgraph Database["PostgreSQL"]
+    users[Tabela users]
+    messages[Tabela messages]
+    measurements[Tabela measurements]
+    workouts[Tabela workouts]
+  end
+
+  webhook --> orchestrator
+  orchestrator --> telegramSvc
+  orchestrator --> openAiSvc
+  orchestrator --> userRepo
+  orchestrator --> messageRepo
+  orchestrator --> measurementRepo
+  orchestrator --> workoutRepo
+
+  userRepo --> users
+  messageRepo --> messages
+  measurementRepo --> measurements
+  workoutRepo --> workouts

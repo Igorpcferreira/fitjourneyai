@@ -1,0 +1,18 @@
+sequenceDiagram
+  autonumber
+  participant U as Usuario - Telegram
+  participant T as Telegram API
+  participant W as WebhookController
+  participant O as MessageOrchestrator
+  participant A as OpenAiService
+  participant DB as PostgreSQL
+  participant S as TelegramService
+
+  U->>T: Envia mensagem "Quero um treino de pernas"
+  T->>W: Envia JSON (Webhook)
+  W->>O: Encaminha mensagem recebida
+  O->>A: Solicita resposta da IA (prompt com contexto do usuário)
+  A-->>O: Retorna plano de treino personalizado
+  O->>DB: Grava histórico (usuário + treino gerado)
+  O->>S: Envia mensagem formatada para envio
+  S-->>U: Envia resposta no Telegram

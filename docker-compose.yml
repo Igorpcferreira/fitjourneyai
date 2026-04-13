@@ -2,17 +2,103 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16
-    container_name: fitjourneyai_db
-    restart: always
+    image: postgres:16-alpine
+    container_name: fitjourneyai-db
     environment:
+      POSTGRES_DB: fitjourneyai
       POSTGRES_USER: fitjourneyai
       POSTGRES_PASSWORD: fitjourneyai
-      POSTGRES_DB: fitjourneyai
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fitjourneyai"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: fitjourneyai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: fitjourneyai-n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: fitjourneyai
+      DB_POSTGRESDB_USER: fitjourneyai
+      DB_POSTGRESDB_PASSWORD: fitjourneyai
+      DB_POSTGRESDB_SCHEMA: n8n
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: admin
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-fitjourney2026}
+      GENERIC_TIMEZONE: America/Sao_Paulo
+      TZ: America/Sao_Paulo
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-change-me}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-change-me}
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8ndata:/home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: fitjourneyai-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/fitjourneyai
+      DATABASE_USER: fitjourneyai
+      DATABASE_PASS: fitjourneyai
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-change-me}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-change-me}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    ports:
+      - "8080:8080"
+
+  sonarqube:
+    image: sonarqube:lts-community
+    container_name: fitjourneyai-sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_extensions:/opt/sonarqube/extensions
 
 volumes:
-  postgres_data:
+  pgdata:
+  redisdata:
+  n8ndata:
+  sonarqube_data:
+  sonarqube_logs:
+  sonarqube_extensions:

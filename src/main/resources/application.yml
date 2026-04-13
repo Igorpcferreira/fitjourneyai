@@ -21,11 +21,19 @@ spring:
     properties:
       hibernate:
         format_sql: true
+        jdbc:
+          time_zone: UTC
 
   flyway:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      timeout: 3000
 
 telegram:
   bot-token: ${TELEGRAM_BOT_TOKEN:change-me}
@@ -35,10 +43,18 @@ telegram:
 openai:
   api-key: ${OPENAI_API_KEY:change-me}
   base-url: https://api.openai.com/v1
-  model: gpt-4.1-mini
+  model: gpt-5.4-mini        # Opções: gpt-4.1-mini (estável) | gpt-5.4-mini (mais novo, testar)
+  timeout-seconds: 30         # Aumentado de 20 para 30 (treinos longos demoram)
+
+# Configurações de reengajamento por inatividade
+fitjourneyai:
+  nudge:
+    inactivity-days: 3        # Dias sem interação para considerar inativo
+    cooldown-hours: 48         # Horas mínimas entre nudges pro mesmo usuário
+    interval-ms: 21600000      # Intervalo de verificação: 6h (em ms)
 
 logging:
   level:
     br.edu.puc.fitjourneyai: INFO
-    # Para ver chamadas HTTP, subir esse nível:
+    # Para debug de chamadas HTTP:
     # org.springframework.web.client.RestTemplate: DEBUG

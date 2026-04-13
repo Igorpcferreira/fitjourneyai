@@ -1,0 +1,24 @@
+stateDiagram-v2
+    [*] --> SemFluxoAtivo
+
+    SemFluxoAtivo --> OnboardingEmAndamento : /start ou perfil incompleto
+    SemFluxoAtivo --> CheckinCorporalEmAndamento : registrar peso/medidas
+    SemFluxoAtivo --> CapturaAtividadeEmAndamento : registrar atividade
+    SemFluxoAtivo --> GeracaoTreinoComplementacaoPendente : pedir treino sem contexto suficiente
+    SemFluxoAtivo --> ConexaoExternaEmAndamento : conectar Strava
+    SemFluxoAtivo --> ProgressoAguardandoRecorte : pedir progresso sem período claro
+    SemFluxoAtivo --> ResumoAguardandoPeriodo : pedir resumo sem período claro
+    SemFluxoAtivo --> FallbackAmbiguidadeEmResolucao : intenção ambígua
+
+    OnboardingEmAndamento --> SemFluxoAtivo : conclusão ou cancelamento
+    CheckinCorporalEmAndamento --> SemFluxoAtivo : conclusão ou cancelamento
+    CapturaAtividadeEmAndamento --> SemFluxoAtivo : conclusão ou cancelamento
+    GeracaoTreinoComplementacaoPendente --> SemFluxoAtivo : treino gerado ou cancelado
+    ConexaoExternaEmAndamento --> SemFluxoAtivo : conexão concluída ou abortada
+    ProgressoAguardandoRecorte --> SemFluxoAtivo : período definido ou cancelado
+    ResumoAguardandoPeriodo --> SemFluxoAtivo : período definido ou cancelado
+    FallbackAmbiguidadeEmResolucao --> SemFluxoAtivo : intenção resolvida
+
+    OnboardingEmAndamento --> FallbackAmbiguidadeEmResolucao : resposta inconsistente
+    CapturaAtividadeEmAndamento --> FallbackAmbiguidadeEmResolucao : modalidade ambígua
+    GeracaoTreinoComplementacaoPendente --> FallbackAmbiguidadeEmResolucao : pedido vago

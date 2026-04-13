@@ -1,0 +1,48 @@
+flowchart TD
+    A[Gatilho:\n/menu, /ajuda, texto genérico,\nfallback ou erro de fluxo] --> B[Pré-checagem:\nverificar onboarding e estado conversacional]
+
+    B --> C{Onboarding concluído?}
+
+    C -->|Não| D[Redirecionar para onboarding\nou retomada inicial]
+    C -->|Sim| E{Existe fluxo ativo ou interrompido?}
+
+    E -->|Sim| F[Identificar fluxo recuperável]
+    E -->|Não| G{Entrada foi comando explícito?}
+
+    G -->|Sim| H[Aplicar navegação determinística]
+    G -->|Não| I[IA:\ninferir intenção provável]
+
+    I --> J{Intenção inferida com confiança suficiente?}
+
+    J -->|Sim| K[Redirecionar para fluxo principal coerente]
+    J -->|Não| L[Entrar em resolução de ambiguidade]
+
+    F --> M{Usuário quer retomar,\ncancelar ou ir ao menu?}
+
+    M -->|Retomar| N[Reabrir fluxo interrompido]
+    M -->|Cancelar| O[Cancelar fluxo atual]
+    M -->|Menu| P[Mostrar navegação disponível]
+
+    H --> P
+    K --> Q[(Persistir atualização de estado\nou de contexto de navegação)]
+    N --> Q
+    O --> R[(Persistir cancelamento\nou limpeza de estado)]
+    P --> S[(Persistir interação simples)]
+    L --> S
+    D --> S
+
+    Q --> T[Resposta final:\nretomada ou entrada no fluxo escolhido]
+    R --> U[Resposta final:\nfluxo cancelado com orientação]
+    S --> V[Resposta final:\nmenu, ajuda ou opções sugeridas]
+
+    T --> W[Próxima ação sugerida:\ncontinuar fluxo]
+    U --> X[Próxima ação sugerida:\nescolher novo fluxo]
+    V --> Y[Próxima ação sugerida:\ncheck-in, atividade,\ntreino, progresso ou resumo]
+
+    F -. fluxo expirado .-> Z[Informar indisponibilidade da retomada]
+    Z --> P
+
+    L -. usuário continua ambíguo .-> AA[Oferecer opções fechadas de escolha]
+    AA --> S
+
+    O -. cancelamento confirmado .-> R

@@ -1,0 +1,74 @@
+flowchart LR
+    subgraph CANAL[Canal e Entrada]
+        A[Recepção do canal\nTelegram]
+    end
+
+    subgraph CORE[Núcleo Conversacional]
+        B[Orquestração conversacional]
+        C[Gestão de estado de conversa]
+        D[Navegação e recuperação]
+    end
+
+    subgraph DOMINIO[Serviços Funcionais do Produto]
+        E[Gestão de perfil\ne onboarding]
+        F[Gestão de check-ins corporais]
+        G[Gestão de atividades]
+        H[Geração de treino]
+        I[Progresso e resumo]
+        J[Interação contextual]
+        K[Reengajamento]
+    end
+
+    subgraph INTEL[Integrações Especializadas]
+        L[Integração com IA]
+        M[Integração com Strava]
+    end
+
+    subgraph DADOS[Persistência e Histórico]
+        N[(Histórico do usuário)]
+        O[(Estado conversacional)]
+        P[(Integrações externas\ne tokens)]
+        Q[(Logs / snapshots opcionais)]
+    end
+
+    A --> B
+    B --> C
+    B --> D
+
+    B --> E
+    B --> F
+    B --> G
+    B --> H
+    B --> I
+    B --> J
+    B --> K
+
+    C --> O
+    D --> O
+
+    E --> N
+    F --> N
+    G --> N
+    H --> N
+    I --> N
+    J --> N
+    K --> N
+
+    B --> L
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+    E --> L
+    G --> L
+
+    G --> M
+    I --> M
+    J --> M
+    K --> M
+    M --> P
+    M --> N
+
+    I --> Q
+    J --> Q
+    K --> Q

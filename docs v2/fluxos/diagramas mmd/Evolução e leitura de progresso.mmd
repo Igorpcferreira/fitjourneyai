@@ -1,0 +1,45 @@
+flowchart TD
+    A[Gatilho:\n/progresso ou pergunta livre\nsobre evolução] --> B[Pré-checagem:\nonboarding concluído e elegibilidade básica]
+
+    B --> C{Há dados mínimos para análise?}
+
+    C -->|Não| D[Informar insuficiência de dados\ncom orientação prática]
+    C -->|Sim| E{Recorte foi informado\nexplicitamente?}
+
+    E -->|Sim| F[Usar recorte solicitado]
+    E -->|Não| G[IA ou regra de apoio:\ninferir recorte provável\nou pedir esclarecimento curto]
+
+    G --> H{Recorte definido com confiança suficiente?}
+    H -->|Não| I[Solicitar recorte objetivo:\nperíodo, tipo de progresso\nou visão geral]
+    H -->|Sim| F
+
+    I --> J[Receber definição do usuário]
+    J --> K{Recorte suficiente?}
+    K -->|Não| L[Oferecer opções fechadas\nde consulta]
+    K -->|Sim| F
+
+    L --> J
+
+    F --> M[Recuperar histórico relevante:\ncheck-ins, atividades,\nimportações reconciliadas\ne outros dados necessários]
+
+    M --> N[Processamento determinístico:\nfiltrar, calcular, comparar\ne agregar métricas]
+    N --> O{Resultado factual ficou suficiente\npara leitura útil?}
+
+    O -->|Não| P[Informar limite do histórico\ne sugerir próximo registro]
+    O -->|Sim| Q[IA:\ninterpretar tendência,\nresumir leitura e sugerir direção]
+
+    Q --> R{Interpretação gerada com sucesso?}
+    R -->|Não| S[Fallback:\nentregar leitura factual curta\nsem camada interpretativa]
+    R -->|Sim| T[Montar resposta final:\nprogresso factual + leitura curta]
+
+    T --> U[Próxima ação sugerida:\nnovo check-in, registrar atividade,\npedir treino ou consultar resumo]
+    S --> V[Próxima ação sugerida:\nnovo check-in, registrar atividade\nou pedir resumo]
+
+    D --> W[Próxima ação sugerida:\nregistrar peso, medidas\nou atividade primeiro]
+    P --> X[Próxima ação sugerida:\nregistrar novos dados\nou ampliar período]
+
+    M -. falha de recuperação .-> Y[Informar erro de consulta\ne oferecer nova tentativa]
+    Y --> Z[Próxima ação sugerida:\ntentar novamente ou consultar depois]
+
+    I -. cancelamento .-> AA[Encerrar consulta com orientação]
+    AA --> AB[Próxima ação sugerida:\nvoltar ao menu ou escolher visão padrão]

@@ -1,0 +1,58 @@
+flowchart TD
+    A[Gatilho opcional:\n/conectar, onboarding,\nmenu ou 'uso Strava'] --> B[Pré-checagem:\nusuário cadastrado e contexto mínimo]
+
+    B --> C{Integração já existe?}
+
+    C -->|Não| D[Iniciar fluxo de conexão]
+    C -->|Sim| E{Usuário quer reconectar,\nmanter ou desconectar?}
+
+    E -->|Manter| F[Exibir status atual da integração]
+    E -->|Reconectar| D
+    E -->|Desconectar| G[(Revogar ou invalidar vínculo\ne atualizar estado interno)]
+
+    D --> H[Redirecionar para consentimento no Strava]
+    H --> I[Receber callback OAuth]
+    I --> J{Callback válido?}
+
+    J -->|Não| K[Informar falha de autenticação\ne oferecer nova tentativa]
+    J -->|Sim| L[Trocar código por tokens]
+
+    L --> M{Troca de tokens bem-sucedida?}
+    M -->|Não| K
+    M -->|Sim| N[(Persistir vínculo externo\n+ access token + refresh token\n+ metadados da integração)]
+
+    N --> O[Importação inicial de atividades]
+    O --> P{Importação inicial retornou dados?}
+
+    P -->|Não| Q[Concluir integração sem atividades\nimportadas no momento]
+    P -->|Sim| R[Aplicar reconciliação com histórico interno]
+
+    R --> S{Atividades reconciliadas\nou classificadas?}
+    S -->|Não| T[Registrar pendências,\nduplicidades ou inconsistências]
+    S -->|Sim| U[(Persistir atividades importadas\n+ status de reconciliação)]
+
+    Q --> V[Integração ativa]
+    T --> V
+    U --> V
+    F --> V
+    G --> W[Resposta final:\ninformar desconexão concluída]
+    K --> X[Resposta final:\nerro com orientação]
+    V --> Y[Resposta final:\ninformar integração ativa\nou concluída]
+
+    Y --> Z[Próxima ação sugerida:\nver progresso, pedir resumo,\nregistrar atividade manual\nou seguir usando normalmente]
+    W --> AA[Próxima ação sugerida:\nseguir com registro manual\nou reconectar depois]
+    X --> AB[Próxima ação sugerida:\ntentar novamente ou seguir sem integração]
+
+    V -. sincronização contínua / webhook / rotina agendada .-> AC[Receber novas atividades externas]
+    AC --> AD[Refresh de token quando necessário]
+    AD --> AE{Token renovado com sucesso?}
+    AE -->|Não| AF[Marcar integração com problema\ne solicitar reconexão]
+    AE -->|Sim| AG[Importar novas atividades]
+
+    AG --> AH[Reconciliação com histórico interno]
+    AH --> AI[(Persistir importações e vínculos)]
+
+    AI -. uso posterior .-> AJ[Progresso considera atividades reconciliadas]
+    AI -. uso posterior .-> AK[Resumo considera atividades reconciliadas]
+    AI -. uso posterior .-> AL[Reengajamento considera atividade externa recente]
+    AI -. uso posterior .-> AM[Conversa contextual pode responder\nsobre atividade importada]

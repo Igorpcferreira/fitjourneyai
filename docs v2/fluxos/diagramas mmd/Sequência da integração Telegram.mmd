@@ -1,0 +1,34 @@
+sequenceDiagram
+    actor U as Usuário
+    participant TG as Telegram
+    participant API as FitJourneyAI Backend
+    participant ORQ as Orquestração Conversacional
+    participant IA as Camada de IA
+    participant DB as Persistência/Histórico
+
+    U->>TG: Envia mensagem ou comando
+    TG->>API: Entrega update/webhook
+    API->>ORQ: Normaliza entrada e encaminha evento
+
+    ORQ->>DB: Recupera usuário, estado de conversa e contexto mínimo
+    DB-->>ORQ: Estado atual + dados relevantes
+
+    ORQ->>ORQ: Executa pré-checagens e decide fluxo principal
+
+    alt Fluxo determinístico sem IA
+        ORQ->>DB: Lê/grava dados do fluxo
+        DB-->>ORQ: Confirma operação
+        ORQ-->>API: Monta resposta objetiva + próxima ação
+    else Fluxo com apoio de IA
+        ORQ->>IA: Envia contexto controlado + instrução
+        IA-->>ORQ: Retorna interpretação, extração ou conteúdo gerado
+        ORQ->>ORQ: Valida uso da resposta no fluxo
+        ORQ->>DB: Lê/grava dados necessários
+        DB-->>ORQ: Confirma operação
+        ORQ-->>API: Monta resposta final + próxima ação
+    else Ambiguidade ou conflito de fluxo
+        ORQ-->>API: Solicita esclarecimento, retomada ou cancelamento
+    end
+
+    API->>TG: Responde ao usuário
+    TG->>U: Entrega mensagem final

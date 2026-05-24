@@ -1,5 +1,6 @@
 package br.edu.puc.fitjourneyai.infrastructure.ai;
 
+import br.edu.puc.fitjourneyai.adapter.openai.dto.OpenAiDtos.ChatMessage;
 import br.edu.puc.fitjourneyai.adapter.openai.OpenAiGateway;
 import br.edu.puc.fitjourneyai.core.model.entity.User;
 import br.edu.puc.fitjourneyai.core.model.enums.GoalType;
@@ -9,17 +10,21 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -100,6 +105,21 @@ class OpenAiServiceImplTest {
                 .thenReturn(Optional.of("Resumo da semana: excelente!"));
         String result = service.generateSummary(user, Map.of("totalTreinos", 5));
         assertThat(result).contains("excelente");
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @DisplayName("generateSummary deve orientar IA sobre início de jornada")
+    void generateSummaryPromptInicioJornada() {
+        when(gateway.chatCompletion(any(), anyDouble(), anyInt()))
+                .thenReturn(Optional.of("Resumo inicial."));
+
+        service.generateSummary(user, Map.of("inicioJornada", true, "diasAcompanhados", 1));
+
+        ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass((Class) List.class);
+        verify(gateway).chatCompletion(captor.capture(), eq(0.7), eq(500));
+        assertThat(captor.getValue().get(0).getContent()).contains("inicioJornada=true");
+        assertThat(captor.getValue().get(0).getContent()).contains("evite bronca");
     }
 
     @Test

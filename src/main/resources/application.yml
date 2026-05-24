@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8081}
 
 spring:
   application:
@@ -44,7 +44,7 @@ openai:
   api-key: ${OPENAI_API_KEY:change-me}
   base-url: https://api.openai.com/v1
   model: gpt-5.4-mini        # Opções: gpt-4.1-mini (estável) | gpt-5.4-mini (mais novo, testar)
-  timeout-seconds: 30         # Aumentado de 20 para 30 (treinos longos demoram)
+  timeout-seconds: 90         # Treinos longos precisam esperar a resposta completa
 
 # Configurações de reengajamento por inatividade
 fitjourneyai:

@@ -113,8 +113,12 @@ class ProgressFlowHandlerTest {
 
         // Mocks dos gráficos
         byte[] fakeChart = new byte[]{1, 2, 3};
+        when(chartService.generateProgressDashboard(any())).thenReturn(fakeChart);
         when(chartService.generateWeightChart(any(), any())).thenReturn(fakeChart);
-        when(chartService.generateTrainingFrequencyChart(any(), any())).thenReturn(fakeChart);
+        when(chartService.generateTrainingFrequencyChart(any(), any(), any())).thenReturn(fakeChart);
+        when(chartService.generateWorkoutVolumeChart(any(), any())).thenReturn(fakeChart);
+        when(chartService.generateWorkoutCalendarHeatmap(any(), any())).thenReturn(fakeChart);
+        when(chartService.generateIntensityTrendChart(any(), any())).thenReturn(fakeChart);
         when(chartService.generateMuscleGroupChart(any(), any())).thenReturn(fakeChart);
 
         FlowResult result = handler.handle(ctx());
@@ -162,12 +166,29 @@ class ProgressFlowHandlerTest {
         );
         when(workoutRepository.findByUserAndDataRealizacaoBetween(any(), any(), any()))
                 .thenReturn(treinos);
-        when(chartService.generateTrainingFrequencyChart(any(), any())).thenReturn(new byte[]{1});
+        when(chartService.generateTrainingFrequencyChart(any(), any(), any())).thenReturn(new byte[]{1});
 
         FlowResult result = handler.handle(ctx());
 
         assertThat(result.responseText()).contains("TREINOS");
         assertThat(result.responseText()).contains("2 treinos");
+    }
+
+    @Test
+    @DisplayName("Deve considerar início recente sem puxão de orelha")
+    void deveConsiderarInicioRecenteSemPuxaoDeOrelha() {
+        user.setCreatedAt(LocalDateTime.now());
+        when(measurementRepository.findByUserAndTipoAndDataRegistroBetweenOrderByDataRegistroAsc(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(workoutRepository.findByUserAndDataRealizacaoBetween(any(), any(), any()))
+                .thenReturn(List.of(buildWorkout(WorkoutGroup.PEITO, 78, 8, 0)));
+
+        FlowResult result = handler.handle(ctx());
+
+        assertThat(result.responseText()).contains("desde que você começou comigo");
+        assertThat(result.responseText()).contains("Ritmo inicial");
+        assertThat(result.responseText()).contains("Começo registrado");
+        assertThat(result.responseText()).doesNotContain("treinando menos");
     }
 
     // ========================================================================

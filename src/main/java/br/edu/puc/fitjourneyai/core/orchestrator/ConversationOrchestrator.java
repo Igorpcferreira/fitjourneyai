@@ -107,7 +107,7 @@ public class ConversationOrchestrator {
         }
 
         // 6. Resolve o handler: se há fluxo ativo, prioriza; senão, roteia por intenção
-        FlowHandler handler = resolveHandler(state, intent);
+        FlowHandler handler = resolveHandler(state, intent, text);
 
         // 7. Monta contexto e delega
         FlowContext context = new FlowContext(chatId, user, state, text, intent, now);
@@ -188,7 +188,13 @@ public class ConversationOrchestrator {
      * 2. Senão, mapeia a intenção para um fluxo e resolve o handler
      * 3. Se não encontrar handler → fallback para NAVIGATION
      */
-    private FlowHandler resolveHandler(ConversationState state, IntentType intent) {
+    private FlowHandler resolveHandler(ConversationState state, IntentType intent, String text) {
+        if (shouldInterruptActiveFlow(state, intent, text)) {
+            log.info("Entrada mudou de contexto durante fluxo ativo. Reiniciando fluxo atual={} para intent={}",
+                    state.getCurrentFlow(), intent);
+            state.reset();
+        }
+
         // Fluxo ativo tem prioridade
         if (state.hasActiveFlow()) {
             Optional<FlowHandler> activeHandler = flowRegistry.resolve(state.getCurrentFlow());
@@ -206,6 +212,87 @@ public class ConversationOrchestrator {
                 .or(() -> flowRegistry.resolve(ConversationFlowType.NAVIGATION))
                 .orElseThrow(() -> new IllegalStateException(
                         "Nenhum FlowHandler encontrado, nem mesmo NAVIGATION"));
+    }
+
+    private boolean isExplicitCommand(String text) {
+        return text != null && text.trim().startsWith("/");
+    }
+
+    private boolean shouldInterruptActiveFlow(ConversationState state, IntentType intent, String text) {
+        if (!state.hasActiveFlow()) {
+            return false;
+        }
+
+        if (isExplicitCommand(text) && intent != IntentType.UNKNOWN && intent != IntentType.CANCELAR) {
+            return true;
+        }
+
+        if (state.getCurrentFlow() == ConversationFlowType.CONFIG) {
+            return shouldExitConfigFlow(intent, text);
+        }
+
+        return false;
+    }
+
+    private boolean shouldExitConfigFlow(IntentType intent, String text) {
+        if (isConfigNumberAnswer(text)) {
+            return false;
+        }
+
+        if (intent != IntentType.UNKNOWN && intent != IntentType.CONFIG) {
+            return true;
+        }
+
+        if (isLikelyConfigAnswer(text)) {
+            return false;
+        }
+
+        return isNaturalSentence(text);
+    }
+
+    private boolean isConfigNumberAnswer(String text) {
+        return normalizeForRouting(text).matches("[1-6]");
+    }
+
+    private boolean isLikelyConfigAnswer(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+
+        String normalized = normalizeForRouting(text);
+        String[] configTokens = {
+                "coach", "amigo", "estoico", "filosofo", "sargento", "drill", "militar",
+                "atleta", "elite", "monge", "guerreiro", "cientista", "ciencia",
+                "leve", "gentil", "suave", "moderado", "medio", "equilibrado",
+                "intenso", "maximo", "hardcore", "pesado"
+        };
+
+        for (String token : configTokens) {
+            if (normalized.matches(".*\\b" + token + "\\b.*")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean isNaturalSentence(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+
+        String trimmed = text.trim();
+        int words = trimmed.split("\\s+").length;
+        return words >= 5 || trimmed.contains("?") || trimmed.contains("!");
+    }
+
+    private String normalizeForRouting(String text) {
+        return java.text.Normalizer.normalize(text == null ? "" : text, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9\\s]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     /**

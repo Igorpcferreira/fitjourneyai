@@ -145,7 +145,7 @@ class WorkoutGenerationFlowHandlerTest {
         assertThat(saved.getFonte()).isEqualTo(WorkoutSource.IA);
         assertThat(saved.getDataGeracao()).isNotNull();
         assertThat(saved.getDescricaoTreino()).isEqualTo("Treino gerado");
-        assertThat(saved.getObservacoes()).contains("peito");
+        assertThat(saved.getObservacoes()).contains("Peito");
     }
 
     @Test
@@ -183,6 +183,23 @@ class WorkoutGenerationFlowHandlerTest {
     }
 
     @Test
+    @DisplayName("Deve extrair duração solicitada em horas e enviar para IA")
+    void deveExtrairDuracaoSolicitadaEmHoras() {
+        when(workoutRepository.findByUserAndDataRealizacaoBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(aiService.generateWorkout(any(), anyMap()))
+                .thenReturn("Treino: Costas e bíceps\nDuração estimada: 2 horas");
+        when(workoutRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        handler.handle(ctx("Me manda um treino de costas, bíceps e antebraço pra fazer em 2 horas"));
+
+        ArgumentCaptor<Map<String, String>> ctxCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(aiService).generateWorkout(any(), ctxCaptor.capture());
+        assertThat(ctxCaptor.getValue().get("duracaoSolicitadaMinutos")).isEqualTo("120");
+        assertThat(ctxCaptor.getValue().get("duracaoSolicitadaLabel")).contains("2 horas");
+    }
+
+    @Test
     @DisplayName("Deve ter suggestedNextAction ao finalizar")
     void deveTerSuggestedNextAction() {
         when(workoutRepository.findByUserAndDataRealizacaoBetween(any(), any(), any()))
@@ -193,6 +210,36 @@ class WorkoutGenerationFlowHandlerTest {
         FlowResult result = handler.handle(ctx("peito"));
 
         assertThat(result.suggestedNextAction()).contains("/treino_feito");
+    }
+
+    @Test
+    @DisplayName("Deve adicionar links de vídeo em exercícios com formato 1)")
+    void deveAdicionarLinksVideoFormatoParentese() {
+        when(workoutRepository.findByUserAndDataRealizacaoBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(aiService.generateWorkout(any(), anyMap()))
+                .thenReturn("Treino principal\n\n1) Supino reto com barra\n- 4x6-8\n\n2) Supino inclinado\n- 3x10");
+        when(workoutRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        FlowResult result = handler.handle(ctx("peito"));
+
+        assertThat(result.responseText()).contains("youtube.com/results?search_query=Supino+reto+com+barra");
+        assertThat(result.responseText()).contains("youtube.com/results?search_query=Supino+inclinado");
+    }
+
+    @Test
+    @DisplayName("Deve limpar artefatos Markdown do treino gerado")
+    void deveLimparMarkdownBold() {
+        when(workoutRepository.findByUserAndDataRealizacaoBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(aiService.generateWorkout(any(), anyMap()))
+                .thenReturn("**Treino principal**\n\n1. Supino reto\n- 4x8");
+        when(workoutRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        FlowResult result = handler.handle(ctx("peito"));
+
+        assertThat(result.responseText()).contains("Treino principal");
+        assertThat(result.responseText()).doesNotContain("**");
     }
 
     // ========================================================================

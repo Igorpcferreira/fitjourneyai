@@ -59,8 +59,16 @@ public class OpenAiServiceImpl implements AiService {
         String pedido = context.getOrDefault("pedido", "treino geral");
         String grupoMuscular = context.getOrDefault("grupoMuscular", "");
         String ultimosTreinos = context.getOrDefault("ultimosTreinos", "sem histórico recente");
+        String duracaoSolicitada = context.getOrDefault("duracaoSolicitadaMinutos", "");
+        String duracaoSolicitadaLabel = context.getOrDefault("duracaoSolicitadaLabel", "");
 
         String systemPrompt = PersonaPromptBuilder.buildWorkoutPrompt(user);
+        String durationInstruction = duracaoSolicitada.isBlank()
+                ? "Duração solicitada: não informada; estime uma duração realista para o pedido."
+                : """
+                Duração solicitada pelo usuário: %s.
+                REGRA CRÍTICA: respeite essa duração no cabeçalho e no volume do treino. Não reduza para uma faixa genérica como 70 a 90 minutos.
+                """.formatted(duracaoSolicitadaLabel);
 
         String userPrompt = """
                 Dados do usuário:
@@ -69,27 +77,30 @@ public class OpenAiServiceImpl implements AiService {
                 - Nível: %s
                 - Frequência semanal: %s
                 - Últimos treinos: %s
+                - %s
                 
                 Pedido: %s
                 %s
                 
-                Monte um treino detalhado para esse pedido, incluindo aquecimento, exercícios principais com séries/repetições, e alongamento final."""
+                Monte um treino detalhado para esse pedido, incluindo aquecimento, exercícios principais com séries/repetições, e alongamento final.
+                Priorize completude sem exagerar no tamanho: não deixe nenhum exercício incompleto."""
                 .formatted(
                         nome,
                         objetivo,
                         nivel,
                         freq,
                         ultimosTreinos,
+                        durationInstruction,
                         pedido,
                         grupoMuscular.isBlank() ? "" : "Foco: " + grupoMuscular
                 );
 
         return gateway.chatCompletion(
                 List.of(msg("system", systemPrompt), msg("user", userPrompt)),
-                0.7, 1000
+                0.7, 4500
         ).orElseGet(() -> {
             log.warn("Fallback de treino ativado para user={}", user.getId());
-            return buildFallbackWorkout(grupoMuscular, nivel);
+            return buildFallbackWorkout(grupoMuscular, nivel, duracaoSolicitadaLabel);
         });
     }
 
@@ -120,6 +131,8 @@ public class OpenAiServiceImpl implements AiService {
         String systemPrompt = """
                 Você é o FitJourneyAI. Gere um resumo interpretativo do período de treino do usuário.
                 Use tom amigável e direto. Destaque conquistas e sugira melhorias. Português do Brasil.
+                Se os dados indicarem inicioJornada=true ou poucos dias acompanhados, trate como começo de acompanhamento:
+                valorize o primeiro registro, fale em próximos passos e evite bronca ou diagnóstico de baixa constância.
                 Máximo 4 parágrafos.""";
 
         String userPrompt = "Nome: %s\nObjetivo: %s\nDados do período: %s"
@@ -201,27 +214,55 @@ public class OpenAiServiceImpl implements AiService {
                 .orElse(textoComTypo);
     }
 
-    private String buildFallbackWorkout(String grupo, String nivel) {
+    private String buildFallbackWorkout(String grupo, String nivel, String duracaoSolicitadaLabel) {
         String grupoLabel = grupo != null && !grupo.isBlank() ? grupo : "Treino geral";
+        String duration = duracaoSolicitadaLabel != null && !duracaoSolicitadaLabel.isBlank()
+                ? duracaoSolicitadaLabel
+                : "45-60 min";
         return """
-                %s (treino padrão)
+                Bora fazer um treino sólido e bem executado.
                 
-                Aquecimento (5 min):
-                - Polichinelos: 2x30
-                - Mobilidade articular
+                Treino: %s
+                Objetivo: treino padrão de contingência
+                Nível: %s
+                Intensidade: moderada
+                Duração estimada: %s
                 
-                Exercícios principais:
-                1. Exercício composto principal - 4x12
-                2. Exercício complementar - 3x15
-                3. Exercício isolado - 3x12
-                4. Exercício de finalização - 3x15
+                Aquecimento
+                1) Polichinelos
+                Séries: 2x30 segundos
+                Descanso: 30s
+                Dica: aterrisse leve e mantenha o tronco firme.
                 
-                Descanso: 60-90s entre séries
+                2) Mobilidade articular
+                Séries: 2x10 movimentos por articulação
+                Descanso: 20s
+                Dica: controle o movimento e aqueça sem pressa.
                 
-                Alongamento (5 min)
+                Treino Principal
+                3) Exercício composto principal
+                Séries: 4x12
+                Descanso: 60-90s
+                Dica: mantenha técnica limpa antes de subir carga.
                 
-                (Este é um treino padrão. Tente novamente com /treino para um treino personalizado com IA.)"""
-                .formatted(grupoLabel);
+                4) Exercício complementar
+                Séries: 3x15
+                Descanso: 60s
+                Dica: controle a fase de descida.
+                
+                5) Exercício isolado
+                Séries: 3x12
+                Descanso: 60s
+                Dica: foque na contração do músculo alvo.
+                
+                Finalização / Alongamento
+                6) Alongamento leve da região treinada
+                Séries: 2x30 segundos
+                Descanso: 20s
+                Dica: alongue sem dor e respire fundo.
+                
+                Treino padrão completo. O importante é não quebrar a consistência."""
+                .formatted(grupoLabel, nivel != null && !nivel.isBlank() ? nivel : "não informado", duration);
     }
 
     private ChatMessage msg(String role, String content) {

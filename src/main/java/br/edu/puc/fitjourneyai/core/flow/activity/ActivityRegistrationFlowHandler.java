@@ -19,6 +19,9 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Fluxo 4 — Registro Manual de Atividade Multimodal.
@@ -56,6 +59,7 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
     private static final int STEP_INTENSIDADE = 3;
     private static final int STEP_OBSERVACOES = 4;
     private static final int STEP_CONFIRMACAO = 5;
+    private static final int STEP_CONFIRMAR_TREINO_SUGERIDO = 6;
 
     private final WorkoutRepository workoutRepository;
     private final ObjectMapper objectMapper;
@@ -81,7 +85,7 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
 
         // Primeira entrada → inicia o fluxo
         if (step == null || !context.state().hasActiveFlow()) {
-            return startFlow();
+            return startFlow(user);
         }
 
         Map<String, String> partial = loadPartialData(context.state().getPartialData());
@@ -92,7 +96,8 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
             case STEP_INTENSIDADE -> handleIntensidade(context, partial);
             case STEP_OBSERVACOES -> handleObservacoes(context, partial);
             case STEP_CONFIRMACAO -> handleConfirmacao(context, partial);
-            default -> startFlow();
+            case STEP_CONFIRMAR_TREINO_SUGERIDO -> handleConfirmarTreinoSugerido(context, partial);
+            default -> startFlow(user);
         };
     }
 
@@ -100,7 +105,16 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
     // STEP HANDLERS
     // ========================================================================
 
-    private FlowResult startFlow() {
+    private FlowResult startFlow(User user) {
+        Optional<Workout> suggestedWorkout = findLatestSuggestedWorkout(user);
+        if (suggestedWorkout.isPresent()) {
+            return askSuggestedWorkoutConfirmation(suggestedWorkout.get());
+        }
+
+        return startManualFlow();
+    }
+
+    private FlowResult startManualFlow() {
         return FlowResult.text(
                 """
                 Boa! \uD83D\uDCAA Vamos registrar um treino que você fez!
@@ -111,6 +125,29 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
                 ConversationFlowType.ACTIVITY_REGISTRATION,
                 STEP_GRUPO,
                 Map.of(),
+                null
+        );
+    }
+
+    private FlowResult handleConfirmarTreinoSugerido(FlowContext context, Map<String, String> partial) {
+        String lower = context.normalizedText();
+
+        if (isYes(lower)) {
+            return persistSuggestedWorkout(context.user(), partial);
+        }
+
+        if (isNo(lower) || lower.contains("outro") || lower.contains("diferente")) {
+            return startManualFlow();
+        }
+
+        return FlowResult.text(
+                """
+                Foi o treino que eu tinha te sugerido?
+                
+                Responde "sim" que eu registro automaticamente, ou "não" para registrar outro treino.""",
+                ConversationFlowType.ACTIVITY_REGISTRATION,
+                STEP_CONFIRMAR_TREINO_SUGERIDO,
+                partial,
                 null
         );
     }
@@ -201,7 +238,7 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
         Integer intensidade = parseIntegerInRange(context.rawText(), 1, 10);
         if (intensidade == null) {
             return stayOnStep(STEP_INTENSIDADE, partial,
-                    "Preciso de um número de 1 a 10 pra intensidade \uD83D\uDE05");
+                    "Preciso de um número de 1 a 10 para intensidade \uD83D\uDE05");
         }
 
         partial.put("intensidade", intensidade.toString());
@@ -259,12 +296,63 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
         }
 
         return stayOnStep(STEP_CONFIRMACAO, partial,
-                "Me manda \"sim\" pra registrar ou \"não\" pra refazer \uD83D\uDE09");
+                "Me manda \"sim\" para registrar ou \"não\" para refazer \uD83D\uDE09");
     }
 
     // ========================================================================
     // PERSISTÊNCIA
     // ========================================================================
+
+    private FlowResult persistSuggestedWorkout(User user, Map<String, String> partial) {
+        try {
+            Long workoutId = Long.parseLong(partial.getOrDefault("suggestedWorkoutId", ""));
+            Workout workout = workoutRepository.findById(workoutId).orElse(null);
+            if (workout == null || workout.getUser() == null
+                    || !workout.getUser().getId().equals(user.getId())) {
+                log.warn("Treino sugerido não encontrado ou não pertence ao user={}, workoutId={}", user.getId(), workoutId);
+                return startManualFlow();
+            }
+
+            WorkoutGroup grupo = workout.getGrupoMuscular() != null
+                    ? workout.getGrupoMuscular()
+                    : mapToWorkoutGroup(partial.getOrDefault("grupoTexto", workout.getDescricaoTreino()));
+            Integer duracao = workout.getDuracaoMinutos() != null
+                    ? workout.getDuracaoMinutos()
+                    : parseEstimatedDurationMinutes(workout.getDescricaoTreino());
+
+            workout.setGrupoMuscular(grupo);
+            workout.setDataRealizacao(LocalDateTime.now());
+            workout.setDuracaoMinutos(duracao);
+            workout.setObservacoes(appendConfirmationNote(workout.getObservacoes()));
+
+            workoutRepository.save(workout);
+
+            log.info("Treino sugerido pela IA confirmado: user={}, workoutId={}", user.getId(), workoutId);
+
+            String dataFormatada = LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy 'às' HH:mm"));
+            String grupoTexto = partial.getOrDefault("grupoTexto", grupo.name());
+
+            return FlowResult.done(
+                    String.format("""
+                            Treino sugerido registrado com sucesso! 🎉
+                            
+                            📅 %s
+                            🏋️ Tipo: %s
+                            ⏱️ Duração estimada: %s
+                            📝 Estrutura: usei automaticamente o treino completo que eu tinha montado para você.
+                            
+                            Mandou bem demais. Registro feito sem retrabalho, do jeito que tem que ser.""",
+                            dataFormatada,
+                            grupoTexto,
+                            duracao != null ? duracao + " min" : "-"),
+                    "Use /progresso para ver sua evolução ou /treino para pedir um novo treino!"
+            );
+        } catch (Exception e) {
+            log.error("Erro ao confirmar treino sugerido para user={}: {}", user.getId(), e.getMessage(), e);
+            return startManualFlow();
+        }
+    }
 
     private FlowResult persistWorkout(User user, Map<String, String> partial) {
         try {
@@ -297,15 +385,15 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
 
             return FlowResult.done(
                     String.format("""
-                            Treino registrado com sucesso! \uD83C\uDF89
+                            Treino registrado com sucesso! 🎉
                             
-                            \uD83D\uDCC5 %s
-                            \uD83C\uDFCB\uFE0F Tipo: %s
-                            \u23F1\uFE0F Duração: %s
-                            \uD83D\uDCAA Intensidade: %s
-                            \uD83D\uDCDD Observações: %s
+                            📅 %s
+                            🏋️ Tipo: %s
+                            ⏱️ Duração: %s
+                            💪 Intensidade: %s
+                            📝 Observações: %s
                             
-                            Mandou bem demais! \uD83D\uDD25 Esse treino já tá no seu histórico e vai aparecer nos gráficos de progresso.""",
+                            Mandou bem demais! 🔥 Esse treino já está no seu histórico e vai aparecer nos gráficos de progresso.""",
                             dataFormatada,
                             grupoTexto,
                             duracao != null ? duracao + " min" : "-",
@@ -326,6 +414,154 @@ public class ActivityRegistrationFlowHandler implements FlowHandler {
     // ========================================================================
     // UTILITÁRIOS
     // ========================================================================
+
+    private Optional<Workout> findLatestSuggestedWorkout(User user) {
+        try {
+            return workoutRepository
+                    .findTopByUserAndFonteAndDataRealizacaoIsNullAndDataGeracaoAfterOrderByDataGeracaoDesc(
+                            user,
+                            WorkoutSource.IA,
+                            LocalDateTime.now().minusHours(48)
+                    );
+        } catch (Exception e) {
+            log.warn("Erro ao buscar último treino sugerido para user={}: {}", user.getId(), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private FlowResult askSuggestedWorkoutConfirmation(Workout workout) {
+        String label = inferSuggestedWorkoutLabel(workout);
+        Map<String, String> partial = new HashMap<>();
+        partial.put("suggestedWorkoutId", workout.getId().toString());
+        partial.put("grupoTexto", label);
+
+        Integer duracao = workout.getDuracaoMinutos() != null
+                ? workout.getDuracaoMinutos()
+                : parseEstimatedDurationMinutes(workout.getDescricaoTreino());
+        if (duracao != null) {
+            partial.put("duracao", duracao.toString());
+        }
+
+        WorkoutGroup grupo = workout.getGrupoMuscular() != null
+                ? workout.getGrupoMuscular()
+                : mapToWorkoutGroup(label);
+        partial.put("grupo", grupo.name());
+
+        return FlowResult.text(
+                String.format("""
+                        Boa! 💪 Foi o treino que eu te sugeri por último?
+                        
+                        Treino sugerido: %s
+                        
+                        Responde "sim" que eu registro automaticamente com a estrutura completa do treino.
+                        Se foi outro treino, responde "não".""", label),
+                ConversationFlowType.ACTIVITY_REGISTRATION,
+                STEP_CONFIRMAR_TREINO_SUGERIDO,
+                partial,
+                null
+        );
+    }
+
+    private String inferSuggestedWorkoutLabel(Workout workout) {
+        if (workout.getObservacoes() != null && workout.getObservacoes().startsWith("Pedido: ")) {
+            return normalizeWorkoutLabel(workout.getObservacoes().substring("Pedido: ".length()).trim());
+        }
+        if (workout.getGrupoMuscular() != null) {
+            return workout.getGrupoMuscular().name().toLowerCase().replace('_', ' ');
+        }
+        String descricao = workout.getDescricaoTreino();
+        if (descricao == null || descricao.isBlank()) {
+            return "treino sugerido pela IA";
+        }
+
+        Matcher treinoMatcher = Pattern.compile("(?im)^\\s*Treino\\s*:\\s*(.+)$").matcher(descricao);
+        if (treinoMatcher.find()) {
+            return normalizeWorkoutLabel(treinoMatcher.group(1).trim());
+        }
+
+        return descricao.lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .map(line -> line.length() > 80 ? line.substring(0, 77) + "..." : line)
+                .map(this::normalizeWorkoutLabel)
+                .orElse("treino sugerido pela IA");
+    }
+
+    private String normalizeWorkoutLabel(String text) {
+        if (text == null || text.isBlank()) {
+            return "treino sugerido pela IA";
+        }
+
+        String lower = text.toLowerCase();
+        java.util.List<String> groups = new java.util.ArrayList<>();
+        if (lower.contains("peito") || lower.contains("peitoral")) groups.add("Peito");
+        if (lower.contains("costa") || lower.contains("dorsal")) groups.add("Costas");
+        if (lower.contains("perna") || lower.contains("quadriceps") || lower.contains("quadríceps")) groups.add("Pernas");
+        if (lower.contains("ombro") || lower.contains("deltoid")) groups.add("Ombro");
+        if (lower.contains("triceps") || lower.contains("tríceps")) groups.add("Tríceps");
+        if (lower.contains("biceps") || lower.contains("bíceps")) groups.add("Bíceps");
+        if (lower.contains("abdomen") || lower.contains("abdômen") || lower.contains("abdominal")) groups.add("Abdômen");
+        if (lower.contains("corrida") || lower.contains("correr") || lower.contains("5km") || lower.contains("10km")) groups.add("Corrida");
+        if (lower.contains("cardio") || lower.contains("hiit")) groups.add("Cardio");
+        if (lower.contains("fullbody") || lower.contains("full body") || lower.contains("corpo todo")) groups.add("Full Body");
+
+        if (!groups.isEmpty()) {
+            return String.join(" + ", groups);
+        }
+
+        String cleaned = text
+                .replaceAll("(?i)\\b(me manda|manda|mande|quero|queria|monta|monte|gera|gere|faz|faça|um|uma|treino|treinao|treinão|de|para|pra|por favor|pfv)\\b", " ")
+                .replaceAll("[,.;:!?]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+
+        if (cleaned.isBlank()) {
+            return "treino sugerido pela IA";
+        }
+        return cleaned.substring(0, 1).toUpperCase() + cleaned.substring(1);
+    }
+
+    private Integer parseEstimatedDurationMinutes(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+
+        Matcher matcher = Pattern.compile(
+                "(?i)dura(?:ção|cao|\\.)?[^\\n\\d]{0,30}(\\d{2,3})(?:\\s*(?:-|a|até|–|—)\\s*(\\d{2,3}))?\\s*(?:min|minutos)"
+        ).matcher(text);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        int first = Integer.parseInt(matcher.group(1));
+        if (matcher.group(2) == null) {
+            return first;
+        }
+        int second = Integer.parseInt(matcher.group(2));
+        return Math.round((first + second) / 2.0f);
+    }
+
+    private String appendConfirmationNote(String observacoes) {
+        String note = "Confirmado pelo usuário via /treino_feito.";
+        if (observacoes == null || observacoes.isBlank()) {
+            return note;
+        }
+        if (observacoes.contains(note)) {
+            return observacoes;
+        }
+        return observacoes + " | " + note;
+    }
+
+    private boolean isYes(String lower) {
+        return lower != null && (lower.startsWith("sim") || lower.equals("s") || lower.equals("ok")
+                || lower.equals("confirmar") || lower.equals("salvar") || lower.equals("foi")
+                || lower.contains("foi esse") || lower.contains("esse mesmo") || lower.contains("isso mesmo"));
+    }
+
+    private boolean isNo(String lower) {
+        return lower != null && (lower.startsWith("nao") || lower.startsWith("não") || lower.equals("n"));
+    }
 
     /**
      * Normalização determinística de typos em nomes de grupo muscular.

@@ -11,6 +11,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -40,6 +41,13 @@ public class WhisperGateway {
      * @return texto transcrito, ou empty se falhar
      */
     public Optional<String> transcribe(String fileId) {
+        return transcribe(fileId, null);
+    }
+
+    /**
+     * Transcreve áudio a partir do file_id do Telegram com dica de MIME type.
+     */
+    public Optional<String> transcribe(String fileId, String mimeType) {
         if (fileId == null || fileId.isBlank()) {
             return Optional.empty();
         }
@@ -48,7 +56,7 @@ public class WhisperGateway {
             // 1. Obter file_path do Telegram
             String filePath = getFilePath(fileId);
             if (filePath == null) {
-                log.warn("Nao foi possivel obter file_path para fileId={}", fileId);
+                log.warn("Não foi possível obter file_path para fileId={}", fileId);
                 return Optional.empty();
             }
 
@@ -62,7 +70,7 @@ public class WhisperGateway {
             log.info("Audio baixado: {} bytes, fileId={}", audioData.length, fileId);
 
             // 3. Enviar para Whisper API
-            return transcribeAudio(audioData, filePath);
+            return transcribeAudio(audioData, filePath, mimeType);
 
         } catch (Exception e) {
             log.error("Erro ao transcrever audio fileId={}: {}", fileId, e.getMessage());
@@ -79,10 +87,18 @@ public class WhisperGateway {
 
         try {
             ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
-            if (response.getBody() != null && Boolean.TRUE.equals(response.getBody().get("ok"))) {
-                Map<String, Object> result = (Map<String, Object>) response.getBody().get("result");
-                return (String) result.get("file_path");
+            Map<?, ?> body = response.getBody();
+            if (body == null || !Boolean.TRUE.equals(body.get("ok"))) {
+                return null;
             }
+
+            Object resultObj = body.get("result");
+            if (!(resultObj instanceof Map<?, ?> result)) {
+                return null;
+            }
+
+            Object filePathObj = result.get("file_path");
+            return filePathObj instanceof String filePath ? filePath : null;
         } catch (Exception e) {
             log.error("Erro ao obter file_path: {}", e.getMessage());
         }
@@ -107,24 +123,27 @@ public class WhisperGateway {
     /**
      * Envia áudio para a API Whisper da OpenAI para transcrição.
      */
-    private Optional<String> transcribeAudio(byte[] audioData, String filePath) {
+    private Optional<String> transcribeAudio(byte[] audioData, String filePath, String mimeType) {
         String url = openAiProperties.getBaseUrl() + "/audio/transcriptions";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         headers.setBearerAuth(openAiProperties.getApiKey());
 
-        // Determina extensao do arquivo
-        String extension = filePath.contains(".") ? filePath.substring(filePath.lastIndexOf('.')) : ".ogg";
-        String filename = "audio" + extension;
+        String filename = resolveFilename(filePath, mimeType);
+        MediaType audioMediaType = resolveAudioMediaType(filename, mimeType);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", new ByteArrayResource(audioData) {
+        ByteArrayResource audioResource = new ByteArrayResource(audioData) {
             @Override
             public String getFilename() {
                 return filename;
             }
-        });
+        };
+
+        HttpHeaders fileHeaders = new HttpHeaders();
+        fileHeaders.setContentType(audioMediaType);
+        body.add("file", new HttpEntity<>(audioResource, fileHeaders));
         body.add("model", "whisper-1");
         body.add("language", "pt");
         body.add("response_format", "text");
@@ -135,13 +154,55 @@ public class WhisperGateway {
 
             String text = response.getBody();
             if (text != null && !text.isBlank()) {
-                log.info("Whisper transcricao: '{}'", text.trim().substring(0, Math.min(text.length(), 80)));
-                return Optional.of(text.trim());
+                String normalized = text.trim();
+                log.info("Whisper transcricao: '{}'", normalized.substring(0, Math.min(normalized.length(), 80)));
+                return Optional.of(normalized);
             }
+            log.warn("Whisper retornou resposta vazia para filePath={} mimeType={}", filePath, mimeType);
         } catch (Exception e) {
             log.error("Erro na transcricao Whisper: {}", e.getMessage());
         }
 
         return Optional.empty();
+    }
+
+    private String resolveFilename(String filePath, String mimeType) {
+        String extension = ".ogg";
+
+        if (filePath != null && filePath.contains(".")) {
+            extension = filePath.substring(filePath.lastIndexOf('.')).toLowerCase(Locale.ROOT);
+        }
+
+        if (mimeType != null && !mimeType.isBlank()) {
+            String lower = mimeType.toLowerCase(Locale.ROOT);
+            if (lower.contains("ogg") || lower.contains("opus")) {
+                extension = ".ogg";
+            } else if (lower.contains("mpeg") || lower.contains("mp3")) {
+                extension = ".mp3";
+            } else if (lower.contains("wav")) {
+                extension = ".wav";
+            }
+        }
+
+        // Whisper aceita OGG; Telegram costuma enviar .oga para voice.
+        if (".oga".equals(extension)) {
+            extension = ".ogg";
+        }
+
+        return "audio" + extension;
+    }
+
+    private MediaType resolveAudioMediaType(String filename, String mimeType) {
+        if (mimeType != null && !mimeType.isBlank()) {
+            return MediaType.parseMediaType(mimeType);
+        }
+
+        if (filename.endsWith(".mp3")) {
+            return MediaType.parseMediaType("audio/mpeg");
+        }
+        if (filename.endsWith(".wav")) {
+            return MediaType.parseMediaType("audio/wav");
+        }
+        return MediaType.parseMediaType("audio/ogg");
     }
 }

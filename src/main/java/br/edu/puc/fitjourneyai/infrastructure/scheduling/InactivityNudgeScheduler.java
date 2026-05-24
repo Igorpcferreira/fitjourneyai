@@ -122,28 +122,28 @@ public class InactivityNudgeScheduler {
 
         if (diasInativo <= 3) {
             return String.format("""
-                    Ei, %s! \uD83D\uDCAA Faz %d dias que você não aparece por aqui.
+                    Ei, %s! 💪 Faz %d dias que você não aparece por aqui.
                     
                     Que tal registrar seu peso com /peso ou pedir um treino com /treino?
                     
-                    Consistência é o segredo! \uD83D\uDD25""", nome, diasInativo);
+                    Consistência é o segredo! 🔥""", nome, diasInativo);
         } else if (diasInativo <= 7) {
             return String.format("""
-                    %s, senti sua falta! \uD83D\uDE4F Faz %d dias que a gente não conversa.
+                    %s, senti sua falta! 🙏 Faz %d dias que a gente não conversa.
                     
                     Lembra do seu objetivo de %s? Cada dia conta!
                     
-                    Manda /peso pra gente retomar ou /treino pra um treino novo. Tô aqui te esperando! \uD83D\uDE80""",
+                    Manda /peso para a gente retomar ou /treino para um treino novo. Tô aqui te esperando! 🚀""",
                     nome, diasInativo, objetivo);
         } else {
             return String.format("""
-                    %s! \uD83D\uDC4B Faz um tempinho que você sumiu (%d dias).
+                    %s! 👋 Faz um tempinho que você sumiu (%d dias).
                     
-                    Sem julgamento nenhum — todo mundo tem fases. O importante é retomar! \uD83C\uDF1F
+                    Sem julgamento nenhum — todo mundo tem fases. O importante é retomar! 🌟
                     
                     Quando quiser voltar, é só mandar /menu que eu te mostro tudo que posso fazer por você.
                     
-                    Tô aqui te esperando, bora juntos! \uD83D\uDCAA""", nome, diasInativo);
+                    Tô aqui te esperando, bora juntos! 💪""", nome, diasInativo);
         }
     }
 

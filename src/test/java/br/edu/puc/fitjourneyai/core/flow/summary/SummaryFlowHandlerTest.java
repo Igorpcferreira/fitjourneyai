@@ -109,6 +109,29 @@ class SummaryFlowHandlerTest {
     }
 
     @Test
+    @DisplayName("Deve tratar início recente como começo de jornada")
+    void deveTratarInicioRecenteComoComecoDeJornada() {
+        user.setCreatedAt(LocalDateTime.now());
+        user.setFrequenciaTreinoEstimada(5);
+        when(measurementRepository.findByUserAndTipoAndDataRegistroBetweenOrderByDataRegistroAsc(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(workoutRepository.findByUserAndDataRealizacaoBetween(any(), any(), any()))
+                .thenReturn(List.of(buildWorkout(WorkoutGroup.PEITO, 78, 8, 0)));
+        when(aiService.generateSummary(any(), anyMap()))
+                .thenReturn("Começo de acompanhamento, bora manter o ritmo.");
+
+        FlowResult result = handler.handle(ctx("/resumo"));
+
+        assertThat(result.responseText()).contains("primeiros 1 dia comigo");
+        assertThat(result.responseText()).contains("Registrado até agora: 1x");
+        assertThat(result.responseText()).doesNotContain("%");
+        verify(aiService).generateSummary(eq(user), argThat(indicators ->
+                Boolean.TRUE.equals(indicators.get("inicioJornada"))
+                        && Integer.valueOf(1).equals(indicators.get("diasAcompanhados"))
+                        && !indicators.containsKey("percentualMeta")));
+    }
+
+    @Test
     @DisplayName("Deve usar fallback quando IA falha")
     void deveUsarFallback() {
         when(measurementRepository.findByUserAndTipoAndDataRegistroBetweenOrderByDataRegistroAsc(any(), any(), any(), any()))

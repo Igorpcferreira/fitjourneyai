@@ -58,7 +58,7 @@ class NavigationFlowHandlerTest {
     @DisplayName("Deve exibir ajuda com diferenciais")
     void deveExibirAjuda() {
         FlowResult result = handler.handle(ctx("/ajuda", IntentType.AJUDA));
-        assertThat(result.responseText()).contains("Eu sou o FitJourneyAI, seu parceiro de treinos e evolução física. Fui feito pra te ajudar a manter o foco e acompanhar cada conquista!");
+        assertThat(result.responseText()).contains("Eu sou o FitJourneyAI, seu parceiro de treinos e evolução física. Fui feito para te ajudar a manter o foco e acompanhar cada conquista!");
     }
 
     @Test

@@ -79,6 +79,24 @@ class WhisperGatewayTest {
     }
 
     @Test
+    @DisplayName("Deve retornar vazio quando getFile retorna body nulo")
+    void deveRetornarVazioQuandoGetFileBodyNulo() {
+        when(restTemplate.getForEntity(contains("getFile"), eq(Map.class)))
+                .thenReturn(ResponseEntity.ok(null));
+
+        assertThat(gateway.transcribe("file123")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Deve retornar vazio quando getFile retorna result invalido")
+    void deveRetornarVazioQuandoGetFileResultInvalido() {
+        when(restTemplate.getForEntity(contains("getFile"), eq(Map.class)))
+                .thenReturn(ResponseEntity.ok(Map.of("ok", true, "result", "invalido")));
+
+        assertThat(gateway.transcribe("file123")).isEmpty();
+    }
+
+    @Test
     @DisplayName("Deve retornar vazio quando download falha")
     void deveRetornarVazioQuandoDownloadFalha() {
         Map<String, Object> fileResult = Map.of("file_path", "voice/file.oga");
@@ -102,5 +120,21 @@ class WhisperGatewayTest {
                 .thenThrow(new RuntimeException("Whisper error"));
 
         assertThat(gateway.transcribe("file123")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Deve transcrever quando Whisper retorna texto com espacos no final")
+    void deveTranscreverComEspacosNoFinal() {
+        Map<String, Object> fileResult = Map.of("file_path", "voice/file_0.oga");
+        Map<String, Object> fileResponse = Map.of("ok", true, "result", fileResult);
+        when(restTemplate.getForEntity(contains("getFile"), eq(Map.class)))
+                .thenReturn(ResponseEntity.ok(fileResponse));
+        when(restTemplate.getForObject(contains("file/bot"), eq(byte[].class)))
+                .thenReturn(new byte[]{1, 2, 3, 4});
+        when(restTemplate.postForEntity(contains("audio/transcriptions"), any(), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("quero treino   "));
+
+        Optional<String> result = gateway.transcribe("file123", "audio/ogg");
+        assertThat(result).contains("quero treino");
     }
 }

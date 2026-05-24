@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -56,7 +57,7 @@ public class SummaryFlowHandler implements FlowHandler {
 
         if (!user.isOnboardingConcluido()) {
             return FlowResult.done(
-                    "Antes de ver seu resumo, preciso te conhecer! Use /start pra fazer o cadastro \uD83D\uDE09",
+                    "Antes de ver seu resumo, preciso te conhecer! Use /start para fazer o cadastro \uD83D\uDE09",
                     "Use /start para iniciar o cadastro."
             );
         }
@@ -66,10 +67,16 @@ public class SummaryFlowHandler implements FlowHandler {
         boolean mensal = text.contains("mensal") || text.contains("mês") || text.contains("mes")
                 || text.contains("30 dias") || text.contains("último mês");
         int dias = mensal ? 30 : 7;
-        String labelPeriodo = mensal ? "últimos 30 dias" : "última semana";
+        String labelPeriodoPadrao = mensal ? "últimos 30 dias" : "última semana";
 
         LocalDateTime fim = LocalDateTime.now();
-        LocalDateTime inicio = fim.minusDays(dias);
+        LocalDateTime inicio = resolvePeriodStart(user, fim, dias);
+        int diasAcompanhados = effectiveDays(user, dias);
+        boolean inicioJornada = diasAcompanhados < dias;
+        boolean inicioRecente = diasAcompanhados < 7;
+        String labelPeriodo = inicioJornada
+                ? "seus primeiros " + diasAcompanhados + (diasAcompanhados == 1 ? " dia comigo" : " dias comigo")
+                : labelPeriodoPadrao;
         String nome = user.getNome() != null ? user.getNome() : "amigo(a)";
 
         // ==================== COLETA DE DADOS ====================
@@ -86,7 +93,7 @@ public class SummaryFlowHandler implements FlowHandler {
                     String.format("""
                             %s, não encontrei registros nos %s \uD83D\uDE14
                             
-                            Registra seu peso com /peso e seus treinos com /treino_feito que na próxima vez monto um resumo completo pra você! \uD83D\uDE80""",
+                            Registra seu peso com /peso e seus treinos com /treino_feito que na próxima vez monto um resumo completo para você! \uD83D\uDE80""",
                             nome, labelPeriodo),
                     "Use /peso ou /treino_feito para começar a registrar."
             );
@@ -96,6 +103,9 @@ public class SummaryFlowHandler implements FlowHandler {
 
         Map<String, Object> indicators = new LinkedHashMap<>();
         indicators.put("periodo", labelPeriodo);
+        indicators.put("periodoSolicitado", labelPeriodoPadrao);
+        indicators.put("diasAcompanhados", diasAcompanhados);
+        indicators.put("inicioJornada", inicioJornada);
         indicators.put("dataInicio", inicio.toLocalDate().format(DATE_FMT));
         indicators.put("dataFim", fim.toLocalDate().format(DATE_FMT));
 
@@ -126,7 +136,7 @@ public class SummaryFlowHandler implements FlowHandler {
         // ---- Treinos ----
         if (!treinos.isEmpty()) {
             int totalTreinos = treinos.size();
-            int semanas = Math.max(1, dias / 7);
+            int semanas = Math.max(1, (int) Math.ceil(diasAcompanhados / 7.0));
             double mediaPerWeek = (double) totalTreinos / semanas;
 
             int totalMinutos = treinos.stream()
@@ -150,7 +160,15 @@ public class SummaryFlowHandler implements FlowHandler {
             String ultimaData = ultimo.getDataRealizacao() != null
                     ? ultimo.getDataRealizacao().toLocalDate().format(DATE_FMT) : "-";
 
-            factual.append(String.format("\uD83C\uDFCB\uFE0F Treinos: %d no período (%.1f/semana)\n", totalTreinos, mediaPerWeek));
+            if (inicioRecente) {
+                factual.append(String.format("\uD83C\uDFCB\uFE0F Treinos: %d registrado%s nesses %d dia%s\n",
+                        totalTreinos,
+                        totalTreinos == 1 ? "" : "s",
+                        diasAcompanhados,
+                        diasAcompanhados == 1 ? "" : "s"));
+            } else {
+                factual.append(String.format("\uD83C\uDFCB\uFE0F Treinos: %d no período (%.1f/semana)\n", totalTreinos, mediaPerWeek));
+            }
             factual.append(String.format("   Tempo total: %s\n", formatMinutes(totalMinutos)));
 
             if (mediaIntensidade.isPresent()) {
@@ -180,16 +198,32 @@ public class SummaryFlowHandler implements FlowHandler {
         // ---- Consistência vs meta ----
         Integer meta = user.getFrequenciaTreinoEstimada();
         if (meta != null && meta > 0 && !treinos.isEmpty()) {
-            int semanas = Math.max(1, dias / 7);
-            double mediaReal = (double) treinos.size() / semanas;
-            double percentual = (mediaReal / meta) * 100;
+            if (inicioRecente) {
+                int faltam = Math.max(0, meta - treinos.size());
+                factual.append(String.format("\uD83D\uDE80 Meta semanal: %dx | Registrado até agora: %dx\n",
+                        meta, treinos.size()));
+                if (faltam > 0) {
+                    factual.append(String.format("   Faltam %d %s para fechar sua primeira semana no ritmo planejado.\n\n",
+                            faltam,
+                            faltam == 1 ? "sessão" : "sessões"));
+                } else {
+                    factual.append("   Você já bateu a meta planejada para esta primeira semana.\n\n");
+                }
 
-            String emoji = percentual >= 90 ? "\uD83C\uDF1F" : percentual >= 60 ? "\uD83D\uDCAA" : "\u23F0";
-            factual.append(String.format("%s Meta semanal: %dx | Real: %.1fx (%.0f%%)\n\n",
-                    emoji, meta, mediaReal, percentual));
+                indicators.put("metaSemanal", meta);
+                indicators.put("treinosFaltantesSemana", faltam);
+            } else {
+                int semanas = Math.max(1, (int) Math.ceil(diasAcompanhados / 7.0));
+                double mediaReal = (double) treinos.size() / semanas;
+                double percentual = (mediaReal / meta) * 100;
 
-            indicators.put("metaSemanal", meta);
-            indicators.put("percentualMeta", percentual);
+                String emoji = percentual >= 90 ? "\uD83C\uDF1F" : percentual >= 60 ? "\uD83D\uDCAA" : "\u23F0";
+                factual.append(String.format("%s Meta semanal: %dx | Real: %.1fx (%.0f%%)\n\n",
+                        emoji, meta, mediaReal, percentual));
+
+                indicators.put("metaSemanal", meta);
+                indicators.put("percentualMeta", percentual);
+            }
         }
 
         // ==================== INTERPRETAÇÃO POR IA ====================
@@ -203,7 +237,7 @@ public class SummaryFlowHandler implements FlowHandler {
 
         return FlowResult.done(
                 fullResponse,
-                "Use /progresso pra ver gráficos ou /treino pra pedir um treino novo!"
+                "Use /progresso para ver gráficos ou /treino para pedir um treino novo!"
         );
     }
 
@@ -223,11 +257,31 @@ public class SummaryFlowHandler implements FlowHandler {
     private String buildFallbackAnalysis(User user, Map<String, Object> indicators) {
         StringBuilder fb = new StringBuilder();
 
+        if (Boolean.TRUE.equals(indicators.get("inicioJornada"))) {
+            if (indicators.containsKey("totalTreinos")) {
+                int totalTreinos = (int) indicators.get("totalTreinos");
+                Object faltamObj = indicators.get("treinosFaltantesSemana");
+                if (faltamObj instanceof Integer faltam && faltam > 0) {
+                    fb.append(String.format(
+                            "Você começou bem: %d treino%s já entrou no histórico. Agora o foco é encaixar mais %d %s para aproximar da meta semanal.\n",
+                            totalTreinos,
+                            totalTreinos == 1 ? "" : "s",
+                            faltam,
+                            faltam == 1 ? "sessão" : "sessões"));
+                } else {
+                    fb.append("Começo excelente: você já tem registro suficiente para eu acompanhar sua evolução com mais precisão daqui para frente.\n");
+                }
+            }
+            return fb.isEmpty()
+                    ? "Primeiros registros feitos. Agora a gente começa a enxergar padrão real de evolução."
+                    : fb.toString();
+        }
+
         if (indicators.containsKey("percentualMeta")) {
             double pct = (double) indicators.get("percentualMeta");
             if (pct >= 90) fb.append("Consistência excelente! Continue assim.\n");
             else if (pct >= 60) fb.append("Bom ritmo, você está no caminho certo!\n");
-            else fb.append("Tem espaço pra mais treinos — que tal encaixar mais um dia?\n");
+            else fb.append("Tem espaço para mais treinos — que tal encaixar mais um dia?\n");
         }
 
         if (indicators.containsKey("variacaoPeso")) {
@@ -240,7 +294,7 @@ public class SummaryFlowHandler implements FlowHandler {
             }
         }
 
-        return fb.isEmpty() ? "Continue registrando pra eu te dar insights cada vez melhores!" : fb.toString();
+        return fb.isEmpty() ? "Continue registrando para eu te dar insights cada vez melhores!" : fb.toString();
     }
 
     private String formatMinutes(int totalMinutos) {
@@ -248,5 +302,21 @@ public class SummaryFlowHandler implements FlowHandler {
         int hours = totalMinutos / 60;
         int mins = totalMinutos % 60;
         return hours + "h" + (mins > 0 ? mins + "min" : "");
+    }
+
+    private LocalDateTime resolvePeriodStart(User user, LocalDateTime fim, int maxDays) {
+        LocalDateTime defaultStart = fim.minusDays(maxDays);
+        if (user.getCreatedAt() == null || user.getCreatedAt().isBefore(defaultStart)) {
+            return defaultStart;
+        }
+        return user.getCreatedAt();
+    }
+
+    private int effectiveDays(User user, int fallbackDays) {
+        if (user.getCreatedAt() == null) {
+            return fallbackDays;
+        }
+        long days = ChronoUnit.DAYS.between(user.getCreatedAt().toLocalDate(), LocalDate.now()) + 1;
+        return Math.max(1, Math.min(fallbackDays, (int) days));
     }
 }

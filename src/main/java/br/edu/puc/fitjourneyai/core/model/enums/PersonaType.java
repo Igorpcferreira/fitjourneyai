@@ -1,56 +1,59 @@
 package br.edu.puc.fitjourneyai.core.model.enums;
 
+import java.text.Normalizer;
+import java.util.Locale;
+
 /**
- * Personas motivacionais configuraveis pelo usuario.
- * Cada persona define um estilo de comunicacao unico para o coach IA.
+ * Personas motivacionais configuráveis pelo usuário.
+ * Cada persona define um estilo de comunicação único para o coach IA.
  */
 public enum PersonaType {
 
     COACH_AMIGO(
             "Coach Amigo",
             "Seu parceiro de treino",
-            "Fala como um amigo proximo que treina junto. Usa girias leves, e animado e acessivel. " +
-            "Motiva pela parceria e cumplicidade. Tom descontraido e positivo."
+            "Fala como um amigo próximo que treina junto. Usa gírias leves, é animado e acessível. " +
+            "Motiva pela parceria e cumplicidade. Tom descontraído e positivo."
     ),
 
     ESTOICO(
-            "Filosofo Estoico",
+            "Filósofo Estoico",
             "Disciplina e sabedoria",
-            "Fala como um filosofo estoico moderno, inspirado em Marco Aurelio e Seneca. " +
-            "Conecta fitness com filosofia de vida: disciplina, controle do que esta ao seu alcance, " +
-            "constancia como virtude, sofrimento como crescimento. Frases curtas e profundas."
+            "Fala como um filósofo estoico moderno, inspirado em Marco Aurélio e Sêneca. " +
+            "Conecta fitness com filosofia de vida: disciplina, controle do que está ao seu alcance, " +
+            "constância como virtude, sofrimento como crescimento. Frases curtas e profundas."
     ),
 
     DRILL_SERGEANT(
             "Sargento de Treinamento",
             "Sem desculpas, sem limites",
             "Fala como um instrutor militar motivacional, inspirado em David Goggins e Jocko Willink. " +
-            "Direto, sem frescura, cobrador. Nao aceita desculpas. Empurra o usuario para alem dos limites. " +
-            "Usa linguagem de superacao e mentalidade guerreira."
+            "Direto, sem frescura, cobrador. Não aceita desculpas. Empurra o usuário para além dos limites. " +
+            "Usa linguagem de superação e mentalidade guerreira."
     ),
 
     ATLETA(
             "Atleta de Elite",
-            "Performance e evolucao",
-            "Fala como um atleta profissional que compartilha experiencia. " +
-            "Foca em tecnica, periodizacao, recuperacao, nutricao e mentalidade competitiva. " +
-            "Usa termos esportivos mas explica quando necessario. Tom de mentoria tecnica."
+            "Performance e evolução",
+            "Fala como um atleta profissional que compartilha experiência. " +
+            "Foca em técnica, periodização, recuperação, nutrição e mentalidade competitiva. " +
+            "Usa termos esportivos, mas explica quando necessário. Tom de mentoria técnica."
     ),
 
     MONGE_GUERREIRO(
             "Monge Guerreiro",
             "Corpo e mente em harmonia",
-            "Fala como um mestre de artes marciais que une corpo e espirito. " +
-            "Conecta treino fisico com paz interior, respiracao, presenca e equilibrio. " +
-            "Usa metaforas de natureza e caminho. Tom sereno mas firme."
+            "Fala como um mestre de artes marciais que une corpo e espírito. " +
+            "Conecta treino físico com paz interior, respiração, presença e equilíbrio. " +
+            "Usa metáforas de natureza e caminho. Tom sereno, mas firme."
     ),
 
     CIENTISTA(
             "Cientista do Corpo",
-            "Dados e evidencias",
-            "Fala como um fisiologista esportivo que ama dados e ciencia. " +
-            "Explica o porquee de cada exercicio, a biomecanica, os efeitos hormonais. " +
-            "Motiva com fatos e logica. Tom didatico e preciso, mas nunca chato."
+            "Dados e evidências",
+            "Fala como um fisiologista esportivo que ama dados e ciência. " +
+            "Explica o porquê de cada exercício, a biomecânica, os efeitos hormonais. " +
+            "Motiva com fatos e lógica. Tom didático e preciso, mas nunca chato."
     );
 
     private final String label;
@@ -68,20 +71,37 @@ public enum PersonaType {
     public String getPromptInstruction() { return promptInstruction; }
 
     /**
-     * Mapeia entrada do usuario (numero ou nome) para PersonaType.
+     * Mapeia entrada do usuário (número ou nome) para PersonaType.
      */
     public static PersonaType fromUserInput(String input) {
         if (input == null || input.isBlank()) return null;
-        String normalized = input.trim().toLowerCase();
+        String normalized = normalize(input);
 
-        return switch (normalized) {
-            case "1", "coach", "amigo", "coach amigo" -> COACH_AMIGO;
-            case "2", "estoico", "filosofo", "stoic" -> ESTOICO;
-            case "3", "sargento", "drill", "militar", "goggins" -> DRILL_SERGEANT;
-            case "4", "atleta", "elite", "performance" -> ATLETA;
-            case "5", "monge", "guerreiro", "marcial" -> MONGE_GUERREIRO;
-            case "6", "cientista", "ciencia", "dados" -> CIENTISTA;
-            default -> null;
-        };
+        if (hasOption(normalized, "1", "um", "coach", "amigo")) return COACH_AMIGO;
+        if (hasOption(normalized, "2", "dois", "estoico", "filosofo", "stoic")) return ESTOICO;
+        if (hasOption(normalized, "3", "tres", "sargento", "drill", "militar", "goggins")) return DRILL_SERGEANT;
+        if (hasOption(normalized, "4", "quatro", "atleta", "elite", "performance")) return ATLETA;
+        if (hasOption(normalized, "5", "cinco", "monge", "guerreiro", "marcial")) return MONGE_GUERREIRO;
+        if (hasOption(normalized, "6", "seis", "cientista", "ciencia", "dados")) return CIENTISTA;
+
+        return null;
+    }
+
+    private static boolean hasOption(String input, String... options) {
+        for (String option : options) {
+            if (input.equals(option) || input.matches(".*\\b" + option + "\\b.*")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalize(String input) {
+        return Normalizer.normalize(input, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9\\s]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }

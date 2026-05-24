@@ -27,9 +27,9 @@ public enum LevelType {
         String normalized = input.trim().toLowerCase();
 
         return switch (normalized) {
-            case "1", "iniciante", "beginner", "começo" -> INICIANTE;
-            case "2", "intermediario", "intermediário", "médio", "medio", "intermediate" -> INTERMEDIARIO;
-            case "3", "avancado", "avançado", "advanced", "experiente" -> AVANCADO;
+            case "1", "um", "uma", "iniciante", "beginner", "começo" -> INICIANTE;
+            case "2", "dois", "duas", "intermediario", "intermediário", "médio", "medio", "intermediate" -> INTERMEDIARIO;
+            case "3", "tres", "três", "avancado", "avançado", "advanced", "experiente" -> AVANCADO;
             default -> null;
         };
     }

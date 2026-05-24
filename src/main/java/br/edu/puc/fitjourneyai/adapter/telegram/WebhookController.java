@@ -38,7 +38,8 @@ public class WebhookController {
 
         // Se e audio de voz, transcreve via Whisper
         if (update.getMessage().hasVoice()) {
-            text = transcribeVoice(chatId, update.getMessage().getVoice().getFileId());
+            TelegramUpdate.TelegramVoice voice = update.getMessage().getVoice();
+            text = transcribeVoice(chatId, voice);
             if (text == null) {
                 return ResponseEntity.ok().build();
             }
@@ -67,7 +68,7 @@ public class WebhookController {
             log.error("Erro ao processar update para chatId={}: {}", chatId, e.getMessage(), e);
             try {
                 messageGateway.sendText(chatId,
-                        "Desculpe, tive um problema tecnico. Tente novamente com /menu.");
+                        "Desculpe, tive um problema técnico. Tente novamente com /menu.");
             } catch (Exception sendError) {
                 log.error("Erro ao enviar fallback: {}", sendError.getMessage());
             }
@@ -80,11 +81,17 @@ public class WebhookController {
      * Transcreve audio de voz via Whisper e notifica o usuario.
      * Retorna o texto transcrito ou null se falhar.
      */
-    private String transcribeVoice(Long chatId, String fileId) {
+    private String transcribeVoice(Long chatId, TelegramUpdate.TelegramVoice voice) {
         try {
-            log.info("Transcrevendo audio: chatId={}, fileId={}", chatId, fileId);
+            if (voice == null || voice.getFileId() == null || voice.getFileId().isBlank()) {
+                log.warn("Voice update sem fileId: chatId={}", chatId);
+                return null;
+            }
 
-            return whisperGateway.transcribe(fileId)
+            log.info("Transcrevendo audio: chatId={}, fileId={}, mimeType={}, duration={}s, size={} bytes",
+                    chatId, voice.getFileId(), voice.getMimeType(), voice.getDuration(), voice.getFileSize());
+
+            return whisperGateway.transcribe(voice.getFileId(), voice.getMimeType())
                     .map(transcription -> {
                         log.info("Audio transcrito: chatId={}, texto='{}'",
                                 chatId, transcription.substring(0, Math.min(transcription.length(), 50)));
@@ -92,14 +99,14 @@ public class WebhookController {
                     })
                     .orElseGet(() -> {
                         messageGateway.sendText(chatId,
-                                "Nao consegui entender o audio. Pode tentar de novo ou mandar por texto?");
+                                        "Não consegui entender o áudio. Pode tentar de novo ou mandar por texto?");
                         return null;
                     });
 
         } catch (Exception e) {
             log.error("Erro na transcricao de audio: chatId={}, error={}", chatId, e.getMessage());
             messageGateway.sendText(chatId,
-                    "Tive um problema ao processar seu audio. Tenta mandar por texto!");
+                    "Tive um problema ao processar seu áudio. Tenta mandar por texto!");
             return null;
         }
     }

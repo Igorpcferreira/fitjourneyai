@@ -59,7 +59,13 @@ public class OpenAiGateway {
                 return Optional.empty();
             }
 
-            String content = body.getChoices().get(0).getMessage().getContent();
+            Choice choice = body.getChoices().get(0);
+            if ("length".equalsIgnoreCase(choice.getFinishReason())) {
+                log.warn("OpenAI interrompeu a resposta por limite de tokens; descartando conteúdo truncado");
+                return Optional.empty();
+            }
+
+            String content = choice.getMessage().getContent();
 
             if (body.getUsage() != null) {
                 log.debug("OpenAI usage: prompt={}, completion={}, total={}",

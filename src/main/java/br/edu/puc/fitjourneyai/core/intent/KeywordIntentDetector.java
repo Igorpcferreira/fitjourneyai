@@ -3,8 +3,8 @@ package br.edu.puc.fitjourneyai.core.intent;
 import br.edu.puc.fitjourneyai.core.model.enums.IntentType;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Optional;
-import java.util.regex.Pattern;
 
 /**
  * Detector de intencao por palavras-chave (prioridade 10).
@@ -13,12 +13,18 @@ import java.util.regex.Pattern;
  * REGRA CRITICA: A ordem das verificacoes importa.
  * Mais especifico primeiro, mais generico depois.
  * Palavras de REACAO (ficou, top, obrigado, valeu) NUNCA devem
- * ativar fluxos funcionais - devem cair na IA.
+ * ativar fluxos funcionais sem um pedido explicito.
  */
 @Component
 public class KeywordIntentDetector implements IntentDetector {
 
-    private static final Pattern PLAIN_NUMBER = Pattern.compile("^\\d+([.,]\\d+)?\\s*(kg)?\\s*$");
+    private static final List<String> GREETING_PREFIXES = List.of(
+            "oi", "ola", "eai", "fala", "salve", "bom dia", "boa tarde", "boa noite", "hey", "hello"
+    );
+
+    private static final List<String> SIMPLE_CONFIRMATIONS = List.of(
+            "ok", "beleza", "blz", "certo", "entendi", "pode crer", "bora", "vamos", "sim", "nao"
+    );
 
     @Override
     public Optional<IntentType> detect(String text) {
@@ -26,20 +32,27 @@ public class KeywordIntentDetector implements IntentDetector {
 
         String lower = normalize(text.trim().toLowerCase());
 
-        // FILTRO GLOBAL: reacoes casuais nunca ativam fluxos
-        if (isCasualReaction(lower)) {
-            return Optional.empty(); // Cai na IA como conversa contextual
+        // FILTRO GLOBAL: reacoes casuais/compromissos nunca ativam fluxos funcionais.
+        // Elas vao direto para conversa contextual e nao passam pela IA classificadora,
+        // que pode confundir "vou treinar" com "gere um treino".
+        boolean casualOrCommitment = isCasualReaction(lower) || isTrainingCommitment(lower);
+        if (casualOrCommitment && !hasExplicitFunctionalRequest(lower)) {
+            return Optional.of(IntentType.CONVERSA);
         }
 
         // Numero isolado -> provavelmente peso
-        if (PLAIN_NUMBER.matcher(lower).matches()) {
+        if (isPlainNumber(lower)) {
             return Optional.of(IntentType.REGISTRO_PESO);
         }
 
         // ===== TREINO FEITO (mais especifico que treino) =====
-        if (lower.contains("treino feito") || lower.contains("fiz treino")
-                || lower.contains("terminei o treino") || lower.contains("treinei")) {
+        if (isTrainingDone(lower)) {
             return Optional.of(IntentType.TREINO_FEITO);
+        }
+
+        // ===== CONVERSA / GUIA (antes de treino, para "como conseguir correr 5km") =====
+        if (isGuidanceQuestion(lower)) {
+            return Optional.of(IntentType.CONVERSA);
         }
 
         // ===== TREINO (pedido de geracao) =====
@@ -83,6 +96,8 @@ public class KeywordIntentDetector implements IntentDetector {
 
         // ===== CONVERSA (exercicio/tecnica/video) =====
         if (lower.contains("como fazer") || lower.contains("como executar")
+                || lower.contains("como faco") || lower.contains("como faz")
+                || lower.contains("como conseguir") || lower.contains("como consigo")
                 || lower.contains("tecnica") || lower.contains("execucao")
                 || lower.contains("video") || lower.contains("o que e")
                 || lower.contains("serve pra") || lower.contains("proteina")
@@ -99,8 +114,19 @@ public class KeywordIntentDetector implements IntentDetector {
      */
     private boolean isCasualReaction(String lower) {
         // Saudacoes puras
-        if (lower.matches("^(oi|ola|eai|fala|salve|bom dia|boa tarde|boa noite|hey|hello)\\b.*")) {
-            return true;
+        for (String greeting : GREETING_PREFIXES) {
+            if (startsWithToken(lower, greeting)) {
+                return true;
+            }
+        }
+
+        String[] reactionPrefixes = {
+                "beleza", "blz", "ok", "certo", "entendi", "fechou",
+                "combinado", "pode deixar", "show", "perfeito", "boa",
+                "valeu", "obrigado", "obrigada", "tmj"
+        };
+        for (String prefix : reactionPrefixes) {
+            if (startsWithToken(lower, prefix)) return true;
         }
 
         // Agradecimentos e elogios (mesmo que contenham "treino" ou "ajuda")
@@ -117,11 +143,155 @@ public class KeywordIntentDetector implements IntentDetector {
         }
 
         // Confirmacoes simples
-        if (lower.matches("^(ok|beleza|blz|certo|entendi|pode crer|bora|vamos|sim|nao)$")) {
-            return true;
+        for (String confirmation : SIMPLE_CONFIRMATIONS) {
+            if (lower.equals(confirmation)) {
+                return true;
+            }
         }
 
         return false;
+    }
+
+    private boolean isTrainingCommitment(String lower) {
+        if (!hasTreinoWord(lower) && !lower.contains("registro") && !lower.contains("registrar")) {
+            return false;
+        }
+
+        if (containsTreinoRequest(lower) || isTrainingDone(lower)) {
+            return false;
+        }
+
+        String[] commitmentPatterns = {
+                "vou treinar", "eu treino", "hoje eu treino", "vou fazer o treino",
+                "vou fazer esse treino", "faco o treino", "farei o treino",
+                "faco o registro", "vou registrar", "farei o registro",
+                "pode deixar que", "sem falta"
+        };
+
+        for (String pattern : commitmentPatterns) {
+            if (lower.contains(pattern)) return true;
+        }
+
+        return false;
+    }
+
+    private boolean hasExplicitFunctionalRequest(String lower) {
+        return containsTreinoRequest(lower)
+                || isTrainingDone(lower)
+                || isDirectHelpRequestCandidate(lower)
+                || isWeightRegistrationRequest(lower)
+                || isMeasureRegistrationRequest(lower)
+                || isProgressOrSummaryRequest(lower)
+                || lower.contains("cancelar")
+                || lower.equals("parar")
+                || lower.equals("sair");
+    }
+
+    private boolean isTrainingDone(String lower) {
+        return lower.contains("treino feito") || lower.contains("fiz treino")
+                || lower.contains("terminei o treino") || lower.contains("treinei");
+    }
+
+    private boolean isDirectHelpRequestCandidate(String lower) {
+        return lower.contains("preciso de ajuda") || lower.contains("me ajuda")
+                || lower.equals("ajuda") || lower.contains("como funciona");
+    }
+
+    private boolean isWeightRegistrationRequest(String lower) {
+        if (!lower.contains("peso") && !lower.contains("pesagem")) {
+            return false;
+        }
+        return hasRequestMarker(lower) || hasDigit(lower)
+                || lower.contains("meu peso") || lower.contains("peso hoje");
+    }
+
+    private boolean isMeasureRegistrationRequest(String lower) {
+        if (hasTreinoWord(lower)) {
+            return false;
+        }
+        boolean hasMeasureWord = lower.contains("medida") || lower.contains("cintura")
+                || lower.contains("quadril");
+        return hasMeasureWord && (hasRequestMarker(lower) || hasDigit(lower)
+                || lower.contains("minha cintura") || lower.contains("meu quadril"));
+    }
+
+    private boolean isProgressOrSummaryRequest(String lower) {
+        boolean hasFeatureWord = lower.contains("progresso") || lower.contains("evolucao")
+                || lower.contains("grafico") || lower.contains("resumo")
+                || lower.contains("relatorio");
+        return hasFeatureWord && (hasRequestMarker(lower)
+                || lower.contains("grafico") || lower.contains("resumo")
+                || lower.contains("relatorio"));
+    }
+
+    private boolean hasRequestMarker(String lower) {
+        String[] markers = {
+                "me manda", "manda", "mande", "quero", "queria", "preciso",
+                "monta", "monte", "gera", "gere", "cria", "crie",
+                "me da", "me ajuda", "pode montar", "pode gerar",
+                "registrar", "registra", "anota", "anotar", "lanca",
+                "lancar", "mostra", "mostrar", "ver", "consulta", "consultar"
+        };
+        for (String marker : markers) {
+            if (lower.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasDigit(String lower) {
+        for (int i = 0; i < lower.length(); i++) {
+            if (Character.isDigit(lower.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean startsWithToken(String text, String token) {
+        if (!text.startsWith(token)) {
+            return false;
+        }
+        if (text.length() == token.length()) {
+            return true;
+        }
+        char next = text.charAt(token.length());
+        return Character.isWhitespace(next) || !Character.isLetterOrDigit(next);
+    }
+
+    private boolean isPlainNumber(String text) {
+        String value = text == null ? "" : text.trim();
+        if (value.endsWith("kg")) {
+            value = value.substring(0, value.length() - 2).trim();
+        }
+        if (value.isEmpty()) {
+            return false;
+        }
+
+        boolean hasDigit = false;
+        boolean hasSeparator = false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isDigit(c)) {
+                hasDigit = true;
+                continue;
+            }
+            if ((c == '.' || c == ',') && !hasSeparator) {
+                hasSeparator = true;
+                // separador não pode ser primeiro/último
+                if (i == 0 || i == value.length() - 1) {
+                    return false;
+                }
+                continue;
+            }
+            if (Character.isWhitespace(c)) {
+                continue;
+            }
+            return false;
+        }
+
+        return hasDigit;
     }
 
     /**
@@ -163,6 +333,17 @@ public class KeywordIntentDetector implements IntentDetector {
                 || lower.startsWith("treinao");
     }
 
+    private boolean isGuidanceQuestion(String lower) {
+        if (!lower.startsWith("como ")) {
+            return false;
+        }
+        return lower.contains("como fazer") || lower.contains("como executar")
+                || lower.contains("como faco") || lower.contains("como faz")
+                || lower.contains("como conseguir") || lower.contains("como consigo")
+                || lower.contains("como melhorar") || lower.contains("como evoluir")
+                || lower.contains("como chegar");
+    }
+
     /**
      * Detecta pedido direto de ajuda (nao mencao casual como "obrigado pela ajuda").
      */
@@ -170,12 +351,12 @@ public class KeywordIntentDetector implements IntentDetector {
         if (!lower.contains("ajuda") && !lower.contains("como funciona")) {
             return false;
         }
-        // "obrigado pela ajuda", "valeu pela ajuda" = casual, nao pedido de ajuda
-        if (isCasualReaction(lower)) return false;
+        // "obrigado pela ajuda", "valeu pela ajuda" = casual, nao pedido de ajuda.
+        // "obrigado, me ajuda..." ainda e um pedido direto.
+        if (isCasualReaction(lower) && !isDirectHelpRequestCandidate(lower)) return false;
 
         // "preciso de ajuda", "me ajuda", "ajuda aqui" = pedido direto
-        return lower.contains("preciso") || lower.contains("me ajuda")
-                || lower.equals("ajuda") || lower.contains("como funciona");
+        return isDirectHelpRequestCandidate(lower);
     }
 
     @Override

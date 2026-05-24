@@ -59,7 +59,7 @@ class ConfigFlowHandlerTest {
         FlowResult result = handler.handle(ctx(null, "config"));
 
         assertThat(result.responseText()).contains("Coach Amigo");
-        assertThat(result.responseText()).contains("Filosofo Estoico");
+        assertThat(result.responseText()).contains("Filósofo Estoico");
         assertThat(result.responseText()).contains("Sargento");
         assertThat(result.responseText()).contains("Atleta");
         assertThat(result.responseText()).contains("Monge");
@@ -73,7 +73,7 @@ class ConfigFlowHandlerTest {
 
         FlowResult result = handler.handle(ctx(1, "2"));
 
-        assertThat(result.responseText()).contains("Filosofo Estoico");
+        assertThat(result.responseText()).contains("Filósofo Estoico");
         assertThat(result.responseText()).contains("intensidade");
         assertThat(user.getPersona()).isEqualTo(PersonaType.ESTOICO);
         verify(userRepository).save(user);
@@ -94,11 +94,35 @@ class ConfigFlowHandlerTest {
     }
 
     @Test
+    @DisplayName("Deve aceitar intensidade por frase natural de áudio")
+    void deveAceitarIntensidadePorFraseNaturalAudio() {
+        when(userRepository.save(any(User.class))).thenReturn(user);
+        user.setPersona(PersonaType.DRILL_SERGEANT);
+
+        FlowResult result = handler.handle(ctx(2, "Pode ser o intenso"));
+
+        assertThat(result.responseText()).contains("Intenso");
+        assertThat(user.getIntensityLevel()).isEqualTo(IntensityLevel.INTENSO);
+        verify(userRepository).save(user);
+    }
+
+    @Test
     @DisplayName("Deve rejeitar persona invalida")
     void deveRejeitarPersonaInvalida() {
         FlowResult result = handler.handle(ctx(1, "abc"));
 
         assertThat(result.responseText()).contains("1 a 6");
+    }
+
+    @Test
+    @DisplayName("Deve reiniciar menu ao receber /config dentro do fluxo")
+    void deveReiniciarMenuComComandoConfig() {
+        FlowResult result = handler.handle(ctx(1, "/config"));
+
+        assertThat(result.nextFlow()).isEqualTo(ConversationFlowType.CONFIG);
+        assertThat(result.nextStep()).isEqualTo(1);
+        assertThat(result.responseText()).contains("Configurações");
+        assertThat(result.responseText()).contains("Persona atual");
     }
 
     @Test
@@ -129,7 +153,7 @@ class ConfigFlowHandlerTest {
 
         FlowResult result = handler.handle(ctx(2, "1"));
 
-        assertThat(result.responseText()).contains("constancia");
+        assertThat(result.responseText()).contains("constância");
         verify(userRepository).save(user);
     }
 

@@ -15,9 +15,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.text.Normalizer;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -107,11 +112,11 @@ public class OnboardingFlowHandler implements FlowHandler {
     private FlowResult startOnboarding() {
         return FlowResult.text(
                 """
-                Oi! \uD83D\uDE04 Eu sou o FitJourneyAI, seu parceiro de treinos e evolução física!
+                Oi! 😄 Eu sou o FitJourneyAI, seu parceiro de treinos e evolução física!
                 
-                Que legal ter você por aqui! Vamos montar seu perfil rapidinho pra eu poder te ajudar da melhor forma possível.
+                Que legal ter você por aqui! Vamos montar seu perfil rapidinho para eu poder te ajudar da melhor forma possível.
                 
-                Pra começar, me conta: como você gosta de ser chamado? \uD83D\uDE09""",
+                Para começar, me conta: como você gosta de ser chamado? 😉""",
                 ConversationFlowType.ONBOARDING,
                 STEP_NOME,
                 Map.of(),
@@ -127,7 +132,15 @@ public class OnboardingFlowHandler implements FlowHandler {
             );
         }
 
-        partial.put("nome", context.rawText().trim());
+        String nome = extractPreferredName(context.rawText());
+        if (nome == null || nome.isBlank()) {
+            return FlowResult.text(
+                    "Ops, não consegui captar seu nome 😅 Me manda só o nome ou algo como \"pode me chamar de Igor\".",
+                    ConversationFlowType.ONBOARDING, STEP_NOME, partial, null
+            );
+        }
+
+        partial.put("nome", nome);
         return FlowResult.text(
                 String.format("""
                         Prazer, %s! \uD83D\uDE4C Que bom te conhecer!
@@ -142,7 +155,7 @@ public class OnboardingFlowHandler implements FlowHandler {
                         5 - Saúde e bem-estar geral \uD83C\uDF3F
                         6 - Ganhar força \uD83E\uDDBE
                         
-                        Ex: "1 e 3" ou "2,6" ou só "2\"""", context.rawText().trim()),
+                        Ex: "1 e 3" ou "2,6" ou só "2\"""", nome),
                 ConversationFlowType.ONBOARDING,
                 STEP_OBJETIVO,
                 partial,
@@ -334,15 +347,15 @@ public class OnboardingFlowHandler implements FlowHandler {
 
             return FlowResult.done(
                     String.format("""
-                            Perfeito, %s! \uD83C\uDF89 Seu perfil tá salvo e estamos prontos pra começar!
+                            Perfeito, %s! 🎉 Seu perfil está salvo e estamos prontos para começar!
                             
-                            A partir de agora eu sou seu parceiro de treino e evolução. Pode contar comigo pra registrar treinos, acompanhar seu progresso e te manter motivado! \uD83D\uDCAA
+                            A partir de agora eu sou seu parceiro de treino e evolução. Pode contar comigo para registrar treinos, acompanhar seu progresso e te manter motivado! 💪
                             
-                            Pra ver tudo que posso fazer, manda /menu
-                            Pra entender melhor como funciono, manda /ajuda
+                            Para ver tudo que posso fazer, manda /menu
+                            Para entender melhor como funciono, manda /ajuda
                             
-                            Bora começar essa jornada juntos! \uD83D\uDE80""", safe(partial.get("nome"))),
-                    "Use /menu pra ver as opções ou /treino pra pedir seu primeiro treino!"
+                            Bora começar essa jornada juntos! 🚀""", safe(partial.get("nome"))),
+                    "Use /menu para ver as opções ou /treino para pedir seu primeiro treino!"
             );
         }
 
@@ -358,7 +371,7 @@ public class OnboardingFlowHandler implements FlowHandler {
         }
 
         return FlowResult.text(
-                "Me manda \"sim\" pra confirmar ou \"não\" pra refazer o cadastro \uD83D\uDE09",
+                "Me manda \"sim\" para confirmar ou \"não\" para refazer o cadastro \uD83D\uDE09",
                 ConversationFlowType.ONBOARDING, STEP_CONFIRMACAO, partial, null
         );
     }
@@ -405,18 +418,41 @@ public class OnboardingFlowHandler implements FlowHandler {
     private List<GoalType> parseMultipleGoals(String input) {
         if (input == null || input.isBlank()) return List.of();
 
+        String normalized = replacePortugueseNumberWords(normalizeForParsing(input));
+
+        LinkedHashSet<GoalType> detectedGoals = new LinkedHashSet<>();
+        Matcher digitMatcher = Pattern.compile("\\b([1-6])\\b").matcher(normalized);
+        while (digitMatcher.find()) {
+            GoalType goal = GoalType.fromUserInput(digitMatcher.group(1));
+            if (goal != null) {
+                detectedGoals.add(goal);
+            }
+        }
+        if (!detectedGoals.isEmpty()) {
+            return List.copyOf(detectedGoals);
+        }
+
         // Se é uma entrada simples (sem separadores), tenta parse direto
-        String normalized = input.trim().toLowerCase();
         if (!normalized.contains(",") && !normalized.contains(" e ") && !normalized.contains("/")) {
             GoalType single = GoalType.fromUserInput(input);
+            if (single != null) {
+                return List.of(single);
+            }
+
+            single = detectGoalByKeywords(normalized);
             return single != null ? List.of(single) : List.of();
         }
 
-        // Multi: separa por vírgula, "e", "/"
-        String[] parts = normalized.split("[,/]|\\s+e\\s+");
+        // Multi: separa por vírgula, "e", "/" sem regex custosa
+        String normalizedSeparators = normalized.replace('/', ',').replace(" e ", ",").replace(" ou ", ",");
+        String[] parts = normalizedSeparators.split(",");
         List<GoalType> goals = new java.util.ArrayList<>();
         for (String part : parts) {
-            GoalType g = GoalType.fromUserInput(part.trim());
+            String cleaned = cleanOptionToken(part);
+            GoalType g = GoalType.fromUserInput(cleaned);
+            if (g == null) {
+                g = detectGoalByKeywords(cleaned);
+            }
             if (g != null && !goals.contains(g)) {
                 goals.add(g);
             }
@@ -475,6 +511,9 @@ public class OnboardingFlowHandler implements FlowHandler {
         if (text == null || text.isBlank()) return null;
         try {
             String cleaned = text.trim().replaceAll("[^0-9]", "");
+            if (cleaned.isEmpty()) {
+                cleaned = extractPortugueseNumber(text);
+            }
             if (cleaned.isEmpty()) return null;
             int value = Integer.parseInt(cleaned);
             return (value >= min && value <= max) ? value : null;
@@ -571,6 +610,138 @@ public class OnboardingFlowHandler implements FlowHandler {
                     ConversationFlowType.ONBOARDING, STEP_ALTURA, partial, null);
             default -> null;
         };
+    }
+
+    private String extractPreferredName(String input) {
+        if (input == null || input.isBlank()) {
+            return null;
+        }
+
+        String cleaned = input.trim()
+                .replaceAll("[\\r\\n]+", " ")
+                .replaceAll("\\s+", " ");
+
+        Pattern phrasePattern = Pattern.compile(
+                "^(?:pode\\s+me\\s+chamar(?:\\s+de)?|me\\s+chama\\s+de|me\\s+chame\\s+de|meu\\s+nome\\s+(?:e|é)|eu\\s+sou|sou|me\\s+chamo|chamo(?:-me)?)\\s+(.+)$",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+        );
+        Matcher matcher = phrasePattern.matcher(cleaned);
+        if (matcher.find()) {
+            cleaned = matcher.group(1).trim();
+        }
+
+        cleaned = cleaned
+                .replaceAll("(?i)^(?:de\\s+)+", "")
+                .replaceAll("^[\"'“”‘’]+|[\"'“”‘’]+$", "")
+                .replaceAll("[.!?;:,]+$", "")
+                .replaceAll("(?i)\\b(?:por favor|pfv|obrigado|obrigada|valeu)\\b.*$", "")
+                .trim();
+
+        if (cleaned.isBlank() || cleaned.length() > 40 || cleaned.split("\\s+").length > 4) {
+            return null;
+        }
+
+        return normalizeNameCasing(cleaned);
+    }
+
+    private String normalizeNameCasing(String name) {
+        Locale ptBr = Locale.forLanguageTag("pt-BR");
+        return Pattern.compile("\\s+")
+                .splitAsStream(name.trim())
+                .filter(part -> !part.isBlank())
+                .map(part -> {
+                    if (part.length() <= 2 && part.equals(part.toUpperCase(ptBr))) {
+                        return part;
+                    }
+                    String lower = part.toLowerCase(ptBr);
+                    return lower.substring(0, 1).toUpperCase(ptBr) + lower.substring(1);
+                })
+                .collect(Collectors.joining(" "));
+    }
+
+    private String normalizeForParsing(String input) {
+        String normalized = Normalizer.normalize(input == null ? "" : input, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT);
+        return normalized.replaceAll("[.;:!?()\\[\\]\"]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String replacePortugueseNumberWords(String input) {
+        String normalized = " " + input + " ";
+        Map<String, String> numbers = Map.ofEntries(
+                Map.entry(" um ", " 1 "),
+                Map.entry(" uma ", " 1 "),
+                Map.entry(" primeiro ", " 1 "),
+                Map.entry(" primeira ", " 1 "),
+                Map.entry(" dois ", " 2 "),
+                Map.entry(" duas ", " 2 "),
+                Map.entry(" segundo ", " 2 "),
+                Map.entry(" segunda ", " 2 "),
+                Map.entry(" tres ", " 3 "),
+                Map.entry(" terceiro ", " 3 "),
+                Map.entry(" terceira ", " 3 "),
+                Map.entry(" quatro ", " 4 "),
+                Map.entry(" quarto ", " 4 "),
+                Map.entry(" quatro dias ", " 4 "),
+                Map.entry(" cinco ", " 5 "),
+                Map.entry(" quinto ", " 5 "),
+                Map.entry(" quinta ", " 5 "),
+                Map.entry(" seis ", " 6 "),
+                Map.entry(" sexto ", " 6 "),
+                Map.entry(" sete ", " 7 "),
+                Map.entry(" setimo ", " 7 "),
+                Map.entry(" oitavo ", " 8 "),
+                Map.entry(" oito ", " 8 "),
+                Map.entry(" nove ", " 9 "),
+                Map.entry(" dez ", " 10 ")
+        );
+
+        for (Map.Entry<String, String> entry : numbers.entrySet()) {
+            normalized = normalized.replace(entry.getKey(), entry.getValue());
+        }
+
+        return normalized.replaceAll("\\s+", " ").trim();
+    }
+
+    private String extractPortugueseNumber(String input) {
+        String normalized = replacePortugueseNumberWords(normalizeForParsing(input));
+        Matcher matcher = Pattern.compile("\\b\\d{1,2}\\b").matcher(normalized);
+        return matcher.find() ? matcher.group() : "";
+    }
+
+    private String cleanOptionToken(String token) {
+        return token == null ? "" : token
+                .replaceAll("[^a-zA-Z0-9À-ÿ\\s-]", " ")
+                .replaceAll("\\b(?:opcao|opcoes|numero|numeros|objetivo|objetivos)\\b", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private GoalType detectGoalByKeywords(String normalized) {
+        if (normalized == null || normalized.isBlank()) {
+            return null;
+        }
+        if (normalized.contains("emagrec") || normalized.contains("perder peso") || normalized.contains("secar")) {
+            return GoalType.EMAGRECER;
+        }
+        if (normalized.contains("massa") || normalized.contains("musculo") || normalized.contains("hipertrof")) {
+            return GoalType.GANHAR_MUSCULO;
+        }
+        if (normalized.contains("condicionamento") || normalized.contains("resistencia") || normalized.contains("folego")) {
+            return GoalType.MELHORAR_CONDICIONAMENTO;
+        }
+        if (normalized.contains("5k") || normalized.contains("10k") || normalized.contains("correr") || normalized.contains("corrida")) {
+            return GoalType.CORRER_5K_10K;
+        }
+        if (normalized.contains("saude") || normalized.contains("bem estar") || normalized.contains("qualidade de vida")) {
+            return GoalType.SAUDE_BEM_ESTAR;
+        }
+        if (normalized.contains("forca") || normalized.contains("powerlifting") || normalized.contains("strongman")) {
+            return GoalType.GANHAR_FORCA;
+        }
+        return null;
     }
 
     private String safe(String value) {

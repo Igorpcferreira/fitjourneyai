@@ -46,6 +46,39 @@
         <sonar.token>SEU_TOKEN_AQUI</sonar.token>
         <sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
         <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+
+        <!--
+            Exclusões do Sonar — classes de boilerplate sem lógica de negócio:
+            • Classe main do Spring Boot (só bootstrap)
+            • DTOs / records de request/response (estrutura pura)
+            • Entidades JPA com Lombok (getters/setters gerados, sem lógica)
+            • Interfaces de porta (apenas contrato, sem implementação)
+        -->
+        <sonar.exclusions>
+            **/FitjourneyaiApplication.java,
+            **/adapter/openai/dto/**,
+            **/adapter/openai/OpenAiGateway.java,
+            **/adapter/telegram/dto/**,
+            **/core/model/entity/User.java,
+            **/core/model/entity/ConversationState.java,
+            **/core/model/vo/**,
+            **/core/port/**,
+            **/core/flow/FlowHandler.java,
+            **/core/ai/AiService.java
+        </sonar.exclusions>
+
+        <!-- JaCoCo também exclui os mesmos pacotes para consistência -->
+        <sonar.coverage.exclusions>
+            **/FitjourneyaiApplication.java,
+            **/adapter/openai/dto/**,
+            **/adapter/telegram/dto/**,
+            **/core/model/entity/User.java,
+            **/core/model/entity/ConversationState.java,
+            **/core/model/vo/**,
+            **/core/port/**,
+            **/core/flow/FlowHandler.java,
+            **/core/ai/AiService.java
+        </sonar.coverage.exclusions>
     </properties>
 
     <dependencies>
@@ -182,6 +215,19 @@
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.12</version>
+                <configuration>
+                    <excludes>
+                        <exclude>**/FitjourneyaiApplication.class</exclude>
+                        <exclude>**/adapter/openai/dto/**</exclude>
+                        <exclude>**/adapter/telegram/dto/**</exclude>
+                        <exclude>**/core/model/entity/User.class</exclude>
+                        <exclude>**/core/model/entity/ConversationState.class</exclude>
+                        <exclude>**/core/model/vo/**</exclude>
+                        <exclude>**/core/port/**</exclude>
+                        <exclude>**/core/flow/FlowHandler.class</exclude>
+                        <exclude>**/core/ai/AiService.class</exclude>
+                    </excludes>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

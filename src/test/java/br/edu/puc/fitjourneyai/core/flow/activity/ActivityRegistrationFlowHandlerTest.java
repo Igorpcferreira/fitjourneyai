@@ -24,6 +24,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -84,6 +85,84 @@ class ActivityRegistrationFlowHandlerTest {
         assertThat(result.nextFlow()).isEqualTo(ConversationFlowType.ACTIVITY_REGISTRATION);
         assertThat(result.nextStep()).isEqualTo(1);
         assertThat(result.responseText()).contains("tipo de treino");
+    }
+
+    @Test
+    @DisplayName("Deve perguntar se treino feito foi o último sugerido pela IA")
+    void devePerguntarSeFoiUltimoTreinoSugerido() {
+        state.setCurrentStep(null);
+        state.setCurrentFlow(ConversationFlowType.NONE);
+        Workout suggested = Workout.builder()
+                .id(99L)
+                .user(user)
+                .fonte(WorkoutSource.IA)
+                .grupoMuscular(WorkoutGroup.PEITO)
+                .descricaoTreino("Treino: Peito + Tríceps + Ombro\nDuração estimada: 70-90 min")
+                .dataGeracao(LocalDateTime.now())
+                .observacoes("Pedido: peito, tríceps e ombro")
+                .build();
+        when(workoutRepository.findTopByUserAndFonteAndDataRealizacaoIsNullAndDataGeracaoAfterOrderByDataGeracaoDesc(
+                any(), eq(WorkoutSource.IA), any())).thenReturn(Optional.of(suggested));
+
+        FlowResult result = handler.handle(ctx(null, "/treino_feito"));
+
+        assertThat(result.nextStep()).isEqualTo(6);
+        assertThat(result.responseText()).contains("treino que eu te sugeri");
+        assertThat(result.stateData()).containsEntry("suggestedWorkoutId", "99");
+    }
+
+    @Test
+    @DisplayName("Deve normalizar pedido bruto do treino sugerido")
+    void deveNormalizarPedidoBrutoDoTreinoSugerido() {
+        state.setCurrentStep(null);
+        state.setCurrentFlow(ConversationFlowType.NONE);
+        Workout suggested = Workout.builder()
+                .id(99L)
+                .user(user)
+                .fonte(WorkoutSource.IA)
+                .grupoMuscular(WorkoutGroup.PEITO)
+                .descricaoTreino("Treino: Peito + Ombro + Tríceps\nDuração estimada: 70-90 min")
+                .dataGeracao(LocalDateTime.now())
+                .observacoes("Pedido: Me manda um treinão de peito, ombro e tríceps")
+                .build();
+        when(workoutRepository.findTopByUserAndFonteAndDataRealizacaoIsNullAndDataGeracaoAfterOrderByDataGeracaoDesc(
+                any(), eq(WorkoutSource.IA), any())).thenReturn(Optional.of(suggested));
+
+        FlowResult result = handler.handle(ctx(null, "/treino_feito"));
+
+        assertThat(result.responseText()).contains("Peito + Ombro + Tríceps");
+        assertThat(result.stateData()).containsEntry("grupoTexto", "Peito + Ombro + Tríceps");
+    }
+
+    @Test
+    @DisplayName("Confirmar treino sugerido deve registrar automaticamente")
+    void confirmarTreinoSugeridoRegistraAutomaticamente() {
+        Workout suggested = Workout.builder()
+                .id(99L)
+                .user(user)
+                .fonte(WorkoutSource.IA)
+                .grupoMuscular(WorkoutGroup.PEITO)
+                .descricaoTreino("Treino: Peito + Tríceps + Ombro\nDuração estimada: 70-90 min\n1) Supino reto")
+                .dataGeracao(LocalDateTime.now())
+                .observacoes("Pedido: peito, tríceps e ombro")
+                .build();
+        state.setCurrentStep(6);
+        state.setPartialData("{\"suggestedWorkoutId\":\"99\",\"grupoTexto\":\"peito, tríceps e ombro\",\"grupo\":\"PEITO\",\"duracao\":\"80\"}");
+        when(workoutRepository.findById(99L)).thenReturn(Optional.of(suggested));
+        when(workoutRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        FlowResult result = handler.handle(ctx(6, "sim"));
+
+        assertThat(result.nextFlow()).isEqualTo(ConversationFlowType.NONE);
+        assertThat(result.responseText()).contains("registrado com sucesso");
+
+        ArgumentCaptor<Workout> captor = ArgumentCaptor.forClass(Workout.class);
+        verify(workoutRepository).save(captor.capture());
+        Workout saved = captor.getValue();
+        assertThat(saved.getDataRealizacao()).isNotNull();
+        assertThat(saved.getFonte()).isEqualTo(WorkoutSource.IA);
+        assertThat(saved.getDuracaoMinutos()).isEqualTo(80);
+        assertThat(saved.getObservacoes()).contains("Confirmado pelo usuário");
     }
 
     @Test

@@ -1,708 +1,990 @@
-{
-  "name": "FitJourneyAI - Workflows Proativos",
-  "nodes": [
-    {
-      "parameters": {},
-      "id": "note-overview",
-      "name": "📋 Visão Geral",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [180, -200],
-      "notes": {
-        "note": "# FitJourneyAI — Workflows Proativos\n\n**3 fluxos automáticos que complementam o backend Java:**\n\n🔔 **Flow 1 — Reengajamento Inteligente** (a cada 6h)\nSubstitui o InactivityNudgeScheduler do Java\n\n📊 **Flow 2 — Relatório Semanal** (toda segunda 8h)\nEnvia resumo proativo sem o usuário pedir\n\n🏆 **Flow 3 — Celebração de Milestones** (a cada 2h)\nDetecta conquistas e celebra automaticamente\n\n**Infraestrutura:** PostgreSQL + Redis + OpenAI + Telegram API"
-      }
-    },
-    {
-      "parameters": {},
-      "id": "note-flow1",
-      "name": "🔔 Flow 1 — Reengajamento",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [180, 60],
-      "notes": {
-        "note": "## 🔔 Reengajamento Inteligente\n\nSubstitui o `InactivityNudgeScheduler.java`\n\n- Executa a cada 6 horas\n- Busca usuários inativos (>3 dias)\n- Calcula contexto (dias inativos, objetivo, último treino)\n- IA gera mensagem personalizada\n- Envia pelo Telegram\n- Registra last_nudge_at\n\n**Vantagem sobre Java:** editável sem deploy, lógica visual"
-      }
-    },
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "hours",
-              "hoursInterval": 6
-            }
-          ]
-        }
-      },
-      "id": "cron-nudge",
-      "name": "⏰ A cada 6h",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [180, 200]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT u.id, u.telegram_chat_id, u.nome, u.objetivo, u.nivel,\n       u.frequencia_treino_estimada, u.peso_atual,\n       u.last_interaction_at, u.last_nudge_at,\n       EXTRACT(DAY FROM (NOW() - u.last_interaction_at))::int AS dias_inativo,\n       (\n         SELECT descricao_treino FROM workouts\n         WHERE user_id = u.id ORDER BY data_realizacao DESC LIMIT 1\n       ) AS ultimo_treino,\n       (\n         SELECT COUNT(*) FROM workouts\n         WHERE user_id = u.id AND data_realizacao > NOW() - INTERVAL '30 days'\n       ) AS treinos_mes\nFROM users u\nWHERE u.onboarding_concluido = true\n  AND u.nudges_enabled = true\n  AND u.last_interaction_at IS NOT NULL\n  AND u.last_interaction_at < NOW() - INTERVAL '3 days'\n  AND (u.last_nudge_at IS NULL OR u.last_nudge_at < NOW() - INTERVAL '48 hours')\nORDER BY u.last_interaction_at ASC\nLIMIT 50;",
-        "options": {}
-      },
-      "id": "query-inativos",
-      "name": "🔍 Buscar Inativos",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [420, 200],
-      "credentials": {
-        "postgres": {
-          "id": "POSTGRES_CREDENTIAL_ID",
-          "name": "FitJourneyAI DB"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "leftValue": "={{ $json.id }}",
-              "rightValue": "",
-              "operator": {
-                "type": "number",
-                "operation": "exists"
-              }
-            }
-          ]
-        }
-      },
-      "id": "check-resultados",
-      "name": "Tem inativos?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [640, 200]
-    },
-    {
-      "parameters": {
-        "jsCode": "const user = $json;\nconst dias = user.dias_inativo || 0;\nconst nome = user.nome || 'amigo(a)';\nconst objetivo = user.objetivo || 'manter forma';\nconst ultimoTreino = user.ultimo_treino || 'nenhum recente';\nconst treinosMes = user.treinos_mes || 0;\n\n// Seleciona tom baseado no tempo de inatividade\nlet tom;\nif (dias <= 3) {\n  tom = 'lembrete leve e amigável';\n} else if (dias <= 7) {\n  tom = 'motivacional com senso de urgência gentil';\n} else {\n  tom = 'empático e acolhedor, sem julgamento, incentivando retomada';\n}\n\nconst prompt = `Gere uma mensagem de reengajamento para:\n- Nome: ${nome}\n- Objetivo: ${objetivo}\n- Dias sem interação: ${dias}\n- Último treino: ${ultimoTreino}\n- Treinos no mês: ${treinosMes}\n- Tom desejado: ${tom}\n\nREGRAS:\n- Máximo 4 linhas\n- Use 1-2 emojis\n- Inclua uma pepita de sabedoria sobre disciplina/saúde\n- Termine com um CTA claro: sugira /peso, /treino ou /progresso\n- Português do Brasil\n- NUNCA julgue ou critique a ausência`;\n\nreturn {\n  ...user,\n  prompt_nudge: prompt,\n  tom: tom\n};"
-      },
-      "id": "code-contexto-nudge",
-      "name": "📝 Preparar Contexto",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [860, 160]
-    },
-    {
-      "parameters": {
-        "resource": "chat",
-        "model": "gpt-5.4-mini",
-        "messages": {
-          "values": [
-            {
-              "role": "system",
-              "content": "Você é o FitJourneyAI, um coach fitness motivacional e sábio. Gere mensagens de reengajamento curtas, personalizadas e com sabedoria. Nunca repita a mesma estrutura."
-            },
-            {
-              "role": "user",
-              "content": "={{ $json.prompt_nudge }}"
-            }
-          ]
-        },
-        "options": {
-          "temperature": 0.9,
-          "maxTokens": 200
-        }
-      },
-      "id": "openai-nudge",
-      "name": "🤖 IA Gerar Nudge",
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 1.8,
-      "position": [1080, 160],
-      "credentials": {
-        "openAiApi": {
-          "id": "OPENAI_CREDENTIAL_ID",
-          "name": "OpenAI FitJourneyAI"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "msg-final-nudge",
-              "name": "mensagem",
-              "value": "={{ $json.text || $json.message?.content || $('📝 Preparar Contexto').item.json.nome + ', faz ' + $('📝 Preparar Contexto').item.json.dias_inativo + ' dias que você não aparece! Bora registrar seu peso com /peso ou pedir um treino com /treino 💪' }}",
-              "type": "string"
-            },
-            {
-              "id": "chat-id-nudge",
-              "name": "chat_id",
-              "value": "={{ $('📝 Preparar Contexto').item.json.telegram_chat_id }}",
-              "type": "number"
-            },
-            {
-              "id": "user-id-nudge",
-              "name": "user_id",
-              "value": "={{ $('📝 Preparar Contexto').item.json.id }}",
-              "type": "number"
-            }
-          ]
-        }
-      },
-      "id": "set-msg-nudge",
-      "name": "📦 Montar Mensagem",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [1300, 160]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"chat_id\": {{ $json.chat_id }},\n  \"text\": {{ JSON.stringify($json.mensagem) }}\n}",
-        "options": {}
-      },
-      "id": "telegram-nudge",
-      "name": "📤 Enviar Telegram",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1520, 160]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=UPDATE users SET last_nudge_at = NOW() WHERE id = {{ $json.user_id }};",
-        "options": {}
-      },
-      "id": "update-nudge",
-      "name": "💾 Registrar Nudge",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [1740, 160],
-      "credentials": {
-        "postgres": {
-          "id": "POSTGRES_CREDENTIAL_ID",
-          "name": "FitJourneyAI DB"
-        }
-      }
-    },
-    {
-      "parameters": {},
-      "id": "noop-nudge",
-      "name": "Nenhum inativo",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [860, 300]
-    },
+﻿{
+    "name":  "FitJourneyAI - Workflows Proativos",
+    "nodes":  [
+                  {
+                      "parameters":  {
+                                         "content":  "# FitJourneyAI - Workflows proativos\n\n**Evidencia da automacao externa com n8n**\n\nEste canvas demonstra tres automacoes que complementam o chatbot principal no Telegram:\n\n1. **Reengajamento inteligente** - busca usuarios inativos e envia nudge personalizado.\n2. **Resumo semanal** - calcula indicadores da semana e envia feedback proativo.\n3. **Milestones** - detecta conquistas, evita duplicidade com Redis e celebra no Telegram.\n\n**Integracoes evidenciadas:** PostgreSQL, Redis, OpenAI e Telegram API.",
+                                         "height":  260,
+                                         "width":  760,
+                                         "color":  5
+                                     },
+                      "id":  "note-overview",
+                      "name":  "📋 Visão Geral",
+                      "type":  "n8n-nodes-base.stickyNote",
+                      "typeVersion":  1,
+                      "position":  [
+                                       180,
+                                       -200
+                                   ],
+                      "notes":  {
+                                    "note":  "# FitJourneyAI — Workflows Proativos\n\n**3 fluxos automáticos que complementam o backend Java:**\n\n🔔 **Flow 1 — Reengajamento Inteligente** (a cada 6h)\nSubstitui o InactivityNudgeScheduler do Java\n\n📊 **Flow 2 — Relatório Semanal** (toda segunda 8h)\nEnvia resumo proativo sem o usuário pedir\n\n🏆 **Flow 3 — Celebração de Milestones** (a cada 2h)\nDetecta conquistas e celebra automaticamente\n\n**Infraestrutura:** PostgreSQL + Redis + OpenAI + Telegram API"
+                                }
+                  },
+                  {
+                      "parameters":  {
+                                         "content":  "## Flow 1 - Reengajamento inteligente\n\n**Objetivo:** recuperar usuarios que ficaram varios dias sem interagir com o bot.\n\n**Como funciona:**\n- Agenda executa a cada 6h.\n- PostgreSQL busca usuarios inativos por mais de 3 dias.\n- O node de codigo monta contexto: objetivo, nivel, ultimo treino e dias inativo.\n- OpenAI gera uma mensagem curta e personalizada.\n- Telegram envia o nudge.\n- PostgreSQL atualiza `last_nudge_at` para evitar spam.\n\n**Para a evidencia:** simule `last_interaction_at` antigo e execute este ramo para mostrar as setas verdes ate `Registrar Nudge`.",
+                                         "height":  300,
+                                         "width":  380,
+                                         "color":  4
+                                     },
+                      "id":  "note-flow1",
+                      "name":  "🔔 Flow 1 — Reengajamento",
+                      "type":  "n8n-nodes-base.stickyNote",
+                      "typeVersion":  1,
+                      "position":  [
+                                       180,
+                                       60
+                                   ],
+                      "notes":  {
+                                    "note":  "## 🔔 Reengajamento Inteligente\n\nSubstitui o `InactivityNudgeScheduler.java`\n\n- Executa a cada 6 horas\n- Busca usuários inativos (\u003e3 dias)\n- Calcula contexto (dias inativos, objetivo, último treino)\n- IA gera mensagem personalizada\n- Envia pelo Telegram\n- Registra last_nudge_at\n\n**Vantagem sobre Java:** editável sem deploy, lógica visual"
+                                }
+                  },
+                  {
+                      "parameters":  {
+                                         "rule":  {
+                                                      "interval":  [
+                                                                       {
+                                                                           "field":  "hours",
+                                                                           "hoursInterval":  6
+                                                                       }
+                                                                   ]
+                                                  }
+                                     },
+                      "id":  "cron-nudge",
+                      "name":  "⏰ A cada 6h",
+                      "type":  "n8n-nodes-base.scheduleTrigger",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       180,
+                                       200
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "executeQuery",
+                                         "query":  "SELECT u.id, u.telegram_chat_id, u.nome, u.objetivo, u.nivel,\n       u.frequencia_treino_estimada, u.peso_atual,\n       u.last_interaction_at, u.last_nudge_at,\n       EXTRACT(DAY FROM (NOW() - u.last_interaction_at))::int AS dias_inativo,\n       (\n         SELECT CONCAT_WS(\u0027 | \u0027,\n                  COALESCE(w.grupo_muscular, \u0027TREINO\u0027),\n                  COALESCE(w.duracao_minutos::text || \u0027 min\u0027, \u0027duracao nao informada\u0027),\n                  \u0027realizado em \u0027 || TO_CHAR(w.data_realizacao, \u0027DD/MM/YYYY\u0027)\n                )\n         FROM workouts w\n         WHERE w.user_id = u.id\n         ORDER BY w.data_realizacao DESC\n         LIMIT 1\n       ) AS ultimo_treino,\n       (\n         SELECT COUNT(*) FROM workouts\n         WHERE user_id = u.id AND data_realizacao \u003e NOW() - INTERVAL \u002730 days\u0027\n       ) AS treinos_mes\nFROM users u\nWHERE u.onboarding_concluido = true\n  AND u.nudges_enabled = true\n  AND u.last_interaction_at IS NOT NULL\n  AND u.last_interaction_at \u003c NOW() - INTERVAL \u00273 days\u0027\n  AND (u.last_nudge_at IS NULL OR u.last_nudge_at \u003c NOW() - INTERVAL \u002748 hours\u0027)\nORDER BY u.last_interaction_at ASC\nLIMIT 50;",
+                                         "options":  {
 
-    {
-      "parameters": {},
-      "id": "note-flow2",
-      "name": "📊 Flow 2 — Relatório Semanal",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [180, 460],
-      "notes": {
-        "note": "## 📊 Relatório Semanal Proativo\n\n**Funcionalidade NOVA que não existe no Java!**\n\n- Toda segunda-feira às 8h\n- Busca usuários ativos com dados na semana\n- Calcula: treinos, variação peso, grupo mais treinado, streak\n- IA gera resumo motivacional personalizado\n- Envia proativamente pelo Telegram\n\n**Valor:** Usuário recebe feedback SEM precisar pedir"
-      }
-    },
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 8 * * 1"
-            }
-          ]
-        }
-      },
-      "id": "cron-semanal",
-      "name": "⏰ Segunda 8h",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [180, 600]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT\n  u.id, u.telegram_chat_id, u.nome, u.objetivo, u.nivel,\n  u.peso_atual, u.frequencia_treino_estimada,\n  -- Treinos da semana\n  (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id\n   AND w.data_realizacao > NOW() - INTERVAL '7 days') AS treinos_semana,\n  -- Total minutos\n  (SELECT COALESCE(SUM(w.duracao_minutos), 0) FROM workouts w WHERE w.user_id = u.id\n   AND w.data_realizacao > NOW() - INTERVAL '7 days') AS minutos_semana,\n  -- Grupo mais treinado\n  (SELECT w.grupo_muscular FROM workouts w WHERE w.user_id = u.id\n   AND w.data_realizacao > NOW() - INTERVAL '7 days'\n   GROUP BY w.grupo_muscular ORDER BY COUNT(*) DESC LIMIT 1) AS grupo_top,\n  -- Peso início da semana\n  (SELECT m.valor FROM measurements m WHERE m.user_id = u.id AND m.tipo = 'PESO'\n   AND m.data_registro > NOW() - INTERVAL '7 days'\n   ORDER BY m.data_registro ASC LIMIT 1) AS peso_inicio_semana,\n  -- Peso fim da semana\n  (SELECT m.valor FROM measurements m WHERE m.user_id = u.id AND m.tipo = 'PESO'\n   AND m.data_registro > NOW() - INTERVAL '7 days'\n   ORDER BY m.data_registro DESC LIMIT 1) AS peso_fim_semana,\n  -- Registros de peso na semana\n  (SELECT COUNT(*) FROM measurements m WHERE m.user_id = u.id AND m.tipo = 'PESO'\n   AND m.data_registro > NOW() - INTERVAL '7 days') AS registros_peso_semana,\n  -- Total treinos histórico\n  (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id) AS total_treinos_historico\nFROM users u\nWHERE u.onboarding_concluido = true\n  AND u.last_interaction_at > NOW() - INTERVAL '14 days'\n  AND (\n    (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id AND w.data_realizacao > NOW() - INTERVAL '7 days') > 0\n    OR\n    (SELECT COUNT(*) FROM measurements m WHERE m.user_id = u.id AND m.data_registro > NOW() - INTERVAL '7 days') > 0\n  )\nORDER BY u.id;",
-        "options": {}
-      },
-      "id": "query-semanal",
-      "name": "🔍 Buscar Ativos c/ Dados",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [420, 600],
-      "credentials": {
-        "postgres": {
-          "id": "POSTGRES_CREDENTIAL_ID",
-          "name": "FitJourneyAI DB"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "leftValue": "={{ $json.id }}",
-              "rightValue": "",
-              "operator": {
-                "type": "number",
-                "operation": "exists"
-              }
-            }
-          ]
-        }
-      },
-      "id": "check-ativos",
-      "name": "Tem ativos?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [640, 600]
-    },
-    {
-      "parameters": {
-        "jsCode": "const u = $json;\nconst nome = u.nome || 'amigo(a)';\nconst objetivo = u.objetivo || 'manter forma';\nconst treinos = u.treinos_semana || 0;\nconst minutos = u.minutos_semana || 0;\nconst grupoTop = u.grupo_top || 'variado';\nconst meta = u.frequencia_treino_estimada || 0;\nconst pesoInicio = u.peso_inicio_semana;\nconst pesoFim = u.peso_fim_semana;\nconst totalHistorico = u.total_treinos_historico || 0;\n\n// Calcula variação de peso\nlet pesoDiff = '';\nif (pesoInicio && pesoFim) {\n  const diff = (pesoFim - pesoInicio).toFixed(1);\n  const sinal = diff >= 0 ? '+' : '';\n  pesoDiff = `Peso: ${pesoInicio}kg → ${pesoFim}kg (${sinal}${diff}kg)`;\n} else {\n  pesoDiff = 'Sem registros de peso essa semana';\n}\n\n// Calcula atingimento da meta\nlet metaMsg = '';\nif (meta > 0) {\n  const pct = Math.round((treinos / meta) * 100);\n  metaMsg = `Meta semanal: ${treinos}/${meta} treinos (${pct}%)`;\n}\n\n// Detecta streak\nlet streakMsg = '';\nif (treinos >= meta && meta > 0) {\n  streakMsg = 'Meta atingida! 🎯';\n} else if (treinos >= 3) {\n  streakMsg = 'Semana produtiva!';\n}\n\nconst prompt = `Gere um relatório semanal motivacional para:\n- Nome: ${nome}\n- Objetivo: ${objetivo}\n- Treinos na semana: ${treinos} (${minutos} minutos total)\n- ${metaMsg}\n- Grupo mais treinado: ${grupoTop}\n- ${pesoDiff}\n- Total treinos no histórico: ${totalHistorico}\n- ${streakMsg}\n\nREGRAS:\n- Máximo 8 linhas\n- Comece com \"📊 Resumo semanal, ${nome}!\"\n- Use emojis com moderação (3-5)\n- Destaque conquistas primeiro\n- Sugira melhoria gentilmente\n- Inclua um ensinamento sobre consistência\n- Termine com: \"Boa semana! Use /treino para um novo treino ou /progresso para ver gráficos\"\n- Português do Brasil`;\n\nreturn {\n  ...u,\n  prompt_semanal: prompt\n};"
-      },
-      "id": "code-contexto-semanal",
-      "name": "📝 Calcular Stats",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [860, 560]
-    },
-    {
-      "parameters": {
-        "resource": "chat",
-        "model": "gpt-5.4-mini",
-        "messages": {
-          "values": [
-            {
-              "role": "system",
-              "content": "Você é o FitJourneyAI, um coach fitness sábio e motivacional. Gere relatórios semanais personalizados, celebrando conquistas e motivando para a próxima semana. Cada relatório deve ser ÚNICO."
-            },
-            {
-              "role": "user",
-              "content": "={{ $json.prompt_semanal }}"
-            }
-          ]
-        },
-        "options": {
-          "temperature": 0.85,
-          "maxTokens": 400
-        }
-      },
-      "id": "openai-semanal",
-      "name": "🤖 IA Gerar Resumo",
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 1.8,
-      "position": [1080, 560],
-      "credentials": {
-        "openAiApi": {
-          "id": "OPENAI_CREDENTIAL_ID",
-          "name": "OpenAI FitJourneyAI"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "msg-final-semanal",
-              "name": "mensagem",
-              "value": "={{ $json.text || $json.message?.content || '📊 Resumo da semana:\\n\\nTreinos: ' + $('📝 Calcular Stats').item.json.treinos_semana + '\\nContinue assim! Use /progresso para ver gráficos.' }}",
-              "type": "string"
-            },
-            {
-              "id": "chat-id-semanal",
-              "name": "chat_id",
-              "value": "={{ $('📝 Calcular Stats').item.json.telegram_chat_id }}",
-              "type": "number"
-            }
-          ]
-        }
-      },
-      "id": "set-msg-semanal",
-      "name": "📦 Montar Mensagem",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [1300, 560]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"chat_id\": {{ $json.chat_id }},\n  \"text\": {{ JSON.stringify($json.mensagem) }}\n}",
-        "options": {}
-      },
-      "id": "telegram-semanal",
-      "name": "📤 Enviar Telegram",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1520, 560]
-    },
-    {
-      "parameters": {},
-      "id": "noop-semanal",
-      "name": "Nenhum ativo",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [860, 700]
-    },
+                                                     }
+                                     },
+                      "id":  "query-inativos",
+                      "name":  "🔍 Buscar Inativos",
+                      "type":  "n8n-nodes-base.postgres",
+                      "typeVersion":  2.5,
+                      "position":  [
+                                       420,
+                                       200
+                                   ],
+                      "credentials":  {
+                                          "postgres":  {
+                                                           "id":  "POSTGRES_CREDENTIAL_ID",
+                                                           "name":  "FitJourneyAI DB"
+                                                       }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  2
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "leftValue":  "={{ $json.id }}",
+                                                                                   "rightValue":  "",
+                                                                                   "operator":  {
+                                                                                                    "type":  "number",
+                                                                                                    "operation":  "exists"
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "check-resultados",
+                      "name":  "Tem inativos?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       640,
+                                       200
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const user = $json;\nconst dias = user.dias_inativo || 0;\nconst nome = String(user.nome || \u0027amigo(a)\u0027).replace(/[,.!]+$/g, \u0027\u0027).trim() || \u0027amigo(a)\u0027;\nconst objetivo = user.objetivo || \u0027manter forma\u0027;\nconst ultimoTreinoBruto = user.ultimo_treino || \u0027nenhum recente\u0027;\nconst ultimoTreino = String(ultimoTreinoBruto).replace(/\\s+/g, \u0027 \u0027).slice(0, 180);\nconst treinosMes = user.treinos_mes || 0;\n\n// Seleciona tom baseado no tempo de inatividade\nlet tom;\nif (dias \u003c= 3) {\n  tom = \u0027lembrete leve e amigavel\u0027;\n} else if (dias \u003c= 7) {\n  tom = \u0027motivacional com senso de urgencia gentil\u0027;\n} else {\n  tom = \u0027empatico e acolhedor, sem julgamento, incentivando retomada\u0027;\n}\n\nconst prompt = `Gere uma mensagem de reengajamento para:\n- Nome: ${nome}\n- Objetivo: ${objetivo}\n- Dias sem interacao: ${dias}\n- Ultimo treino: ${ultimoTreino}\n- Treinos no mes: ${treinosMes}\n- Tom desejado: ${tom}\n\nREGRAS:\n- Maximo 4 linhas\n- Use 1-2 emojis\n- Inclua uma pepita de sabedoria sobre disciplina/saude\n- Termine com um CTA claro: sugira /peso, /treino ou /progresso\n- Portugues do Brasil\n- NUNCA julgue ou critique a ausencia`;\n\nreturn {\n  ...user,\n  nome,\n  ultimo_treino_resumido: ultimoTreino,\n  prompt_nudge: prompt,\n  tom: tom\n};"
+                                     },
+                      "id":  "code-contexto-nudge",
+                      "name":  "📝 Preparar Contexto",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       860,
+                                       160
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "https://api.openai.com/v1/chat/completions",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "Authorization",
+                                                                                         "value":  "=Bearer {{ $env.OPENAI_API_KEY }}"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Content-Type",
+                                                                                         "value":  "application/json"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"model\": \"gpt-5.4-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Voce e o FitJourneyAI, um coach fitness motivacional e sabio. Gere mensagens de reengajamento curtas, personalizadas e com sabedoria. Nunca repita a mesma estrutura. Responda em portugues do Brasil.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.prompt_nudge) }}\n    }\n  ],\n  \"temperature\": 0.9,\n  \"max_completion_tokens\": 200\n}",
+                                         "options":  {
 
-    {
-      "parameters": {},
-      "id": "note-flow3",
-      "name": "🏆 Flow 3 — Milestones",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [180, 860],
-      "notes": {
-        "note": "## 🏆 Celebração de Milestones\n\n**Funcionalidade NOVA que não existe no Java!**\n\n- Executa a cada 2 horas\n- Detecta conquistas:\n  • 10º, 25º, 50º, 100º treino\n  • 5kg perdidos, 10kg perdidos\n  • 7 dias seguidos treinando (streak)\n- Redis impede celebração duplicada\n- IA gera mensagem especial\n\n**Valor:** Gamificação e retenção"
-      }
-    },
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "hours",
-              "hoursInterval": 2
-            }
-          ]
-        }
-      },
-      "id": "cron-milestone",
-      "name": "⏰ A cada 2h",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [180, 1000]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT\n  u.id, u.telegram_chat_id, u.nome, u.objetivo,\n  (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id) AS total_treinos,\n  -- Peso mais antigo vs atual\n  (SELECT m.valor FROM measurements m WHERE m.user_id = u.id AND m.tipo = 'PESO'\n   ORDER BY m.data_registro ASC LIMIT 1) AS peso_primeiro,\n  u.peso_atual,\n  -- Streak: dias consecutivos com treino na última semana\n  (SELECT COUNT(DISTINCT DATE(w.data_realizacao)) FROM workouts w\n   WHERE w.user_id = u.id AND w.data_realizacao > NOW() - INTERVAL '7 days') AS dias_treino_semana\nFROM users u\nWHERE u.onboarding_concluido = true\n  AND u.last_interaction_at > NOW() - INTERVAL '30 days'\nORDER BY u.id;",
-        "options": {}
-      },
-      "id": "query-milestones",
-      "name": "🔍 Buscar Dados",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [420, 1000],
-      "credentials": {
-        "postgres": {
-          "id": "POSTGRES_CREDENTIAL_ID",
-          "name": "FitJourneyAI DB"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const u = $json;\nconst milestones = [];\nconst totalTreinos = u.total_treinos || 0;\nconst pesoInicial = u.peso_primeiro;\nconst pesoAtual = u.peso_atual;\nconst diasTreinoSemana = u.dias_treino_semana || 0;\n\n// Milestone de treinos\nconst treinoMilestones = [10, 25, 50, 75, 100, 150, 200, 500];\nfor (const m of treinoMilestones) {\n  if (totalTreinos === m) {\n    milestones.push({\n      tipo: 'treino',\n      valor: m,\n      key: `milestone:treino:${u.id}:${m}`,\n      descricao: `${m}º treino registrado!`\n    });\n  }\n}\n\n// Milestone de peso perdido\nif (pesoInicial && pesoAtual) {\n  const perdido = pesoInicial - pesoAtual;\n  const pesoMilestones = [3, 5, 10, 15, 20];\n  for (const m of pesoMilestones) {\n    if (perdido >= m && perdido < m + 1) {\n      milestones.push({\n        tipo: 'peso',\n        valor: m,\n        key: `milestone:peso:${u.id}:${m}`,\n        descricao: `${m}kg perdidos desde o início!`\n      });\n    }\n  }\n}\n\n// Milestone de streak\nif (diasTreinoSemana >= 5) {\n  milestones.push({\n    tipo: 'streak',\n    valor: diasTreinoSemana,\n    key: `milestone:streak:${u.id}:${diasTreinoSemana}`,\n    descricao: `${diasTreinoSemana} dias treinando essa semana!`\n  });\n}\n\nif (milestones.length === 0) {\n  return []; // Nenhum milestone — para o fluxo\n}\n\nreturn milestones.map(m => ({\n  ...u,\n  milestone: m\n}));"
-      },
-      "id": "code-detectar-milestones",
-      "name": "🎯 Detectar Milestones",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [640, 1000]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "leftValue": "={{ $json.milestone }}",
-              "rightValue": "",
-              "operator": {
-                "type": "object",
-                "operation": "exists"
-              }
-            }
-          ]
-        }
-      },
-      "id": "check-milestone",
-      "name": "Tem milestone?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [860, 1000]
-    },
-    {
-      "parameters": {
-        "operation": "get",
-        "key": "={{ $json.milestone.key }}"
-      },
-      "id": "redis-check-celebrado",
-      "name": "🔴 Já celebrou?",
-      "type": "n8n-nodes-base.redis",
-      "typeVersion": 1,
-      "position": [1080, 960],
-      "credentials": {
-        "redis": {
-          "id": "REDIS_CREDENTIAL_ID",
-          "name": "FitJourneyAI Redis"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "leftValue": "={{ $json.value }}",
-              "rightValue": "",
-              "operator": {
-                "type": "string",
-                "operation": "notExists"
-              }
-            }
-          ]
-        }
-      },
-      "id": "check-nao-celebrado",
-      "name": "Ainda não celebrou?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [1300, 960]
-    },
-    {
-      "parameters": {
-        "resource": "chat",
-        "model": "gpt-5.4-mini",
-        "messages": {
-          "values": [
-            {
-              "role": "system",
-              "content": "Você é o FitJourneyAI celebrando uma conquista do usuário! Seja MUITO entusiasmado, use emojis, celebre de verdade. Máximo 4 linhas. Português do Brasil."
-            },
-            {
-              "role": "user",
-              "content": "=Gere uma mensagem de celebração para {{ $('🎯 Detectar Milestones').item.json.nome || 'amigo(a)' }}!\n\nConquista: {{ $('🎯 Detectar Milestones').item.json.milestone.descricao }}\nObjetivo: {{ $('🎯 Detectar Milestones').item.json.objetivo || 'fitness' }}\n\nCelebre essa conquista e incentive a continuar!"
-            }
-          ]
-        },
-        "options": {
-          "temperature": 0.95,
-          "maxTokens": 200
-        }
-      },
-      "id": "openai-milestone",
-      "name": "🤖 IA Celebrar",
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 1.8,
-      "position": [1520, 920],
-      "credentials": {
-        "openAiApi": {
-          "id": "OPENAI_CREDENTIAL_ID",
-          "name": "OpenAI FitJourneyAI"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"chat_id\": {{ $('🎯 Detectar Milestones').item.json.telegram_chat_id }},\n  \"text\": {{ JSON.stringify($json.text || $json.message?.content || '🏆 Parabéns pela conquista!') }}\n}",
-        "options": {}
-      },
-      "id": "telegram-milestone",
-      "name": "📤 Enviar Celebração",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1740, 920]
-    },
-    {
-      "parameters": {
-        "operation": "set",
-        "key": "={{ $('🎯 Detectar Milestones').item.json.milestone.key }}",
-        "value": "=celebrated:{{ $now.format('yyyy-MM-dd') }}",
-        "expire": true,
-        "ttl": 7776000
-      },
-      "id": "redis-marcar-celebrado",
-      "name": "🔴 Marcar Celebrado",
-      "type": "n8n-nodes-base.redis",
-      "typeVersion": 1,
-      "position": [1960, 920],
-      "credentials": {
-        "redis": {
-          "id": "REDIS_CREDENTIAL_ID",
-          "name": "FitJourneyAI Redis"
-        }
-      }
-    },
-    {
-      "parameters": {},
-      "id": "noop-milestone",
-      "name": "Sem milestones",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [1080, 1100]
-    },
-    {
-      "parameters": {},
-      "id": "noop-ja-celebrado",
-      "name": "Já celebrado",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [1520, 1060]
-    }
-  ],
-  "connections": {
-    "⏰ A cada 6h": {
-      "main": [
-        [{"node": "🔍 Buscar Inativos", "type": "main", "index": 0}]
-      ]
-    },
-    "🔍 Buscar Inativos": {
-      "main": [
-        [{"node": "Tem inativos?", "type": "main", "index": 0}]
-      ]
-    },
-    "Tem inativos?": {
-      "main": [
-        [{"node": "📝 Preparar Contexto", "type": "main", "index": 0}],
-        [{"node": "Nenhum inativo", "type": "main", "index": 0}]
-      ]
-    },
-    "📝 Preparar Contexto": {
-      "main": [
-        [{"node": "🤖 IA Gerar Nudge", "type": "main", "index": 0}]
-      ]
-    },
-    "🤖 IA Gerar Nudge": {
-      "main": [
-        [{"node": "📦 Montar Mensagem", "type": "main", "index": 0}]
-      ]
-    },
-    "📦 Montar Mensagem": {
-      "main": [
-        [{"node": "📤 Enviar Telegram", "type": "main", "index": 0}]
-      ]
-    },
-    "📤 Enviar Telegram": {
-      "main": [
-        [{"node": "💾 Registrar Nudge", "type": "main", "index": 0}]
-      ]
-    },
+                                                     }
+                                     },
+                      "id":  "openai-nudge",
+                      "name":  "🤖 IA Gerar Nudge",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       1080,
+                                       160
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "msg-final-nudge",
+                                                                                     "name":  "mensagem",
+                                                                                     "value":  "={{ $json.choices?.[0]?.message?.content || $json.text || $json.message?.content || $(\u0027📝 Preparar Contexto\u0027).item.json.nome + \u0027, faz \u0027 + $(\u0027📝 Preparar Contexto\u0027).item.json.dias_inativo + \u0027 dias que voce nao aparece! Bora registrar seu peso com /peso ou pedir um treino com /treino 💪\u0027 }}",
+                                                                                     "type":  "string"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "chat-id-nudge",
+                                                                                     "name":  "chat_id",
+                                                                                     "value":  "={{ $(\u0027📝 Preparar Contexto\u0027).item.json.telegram_chat_id }}",
+                                                                                     "type":  "number"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "user-id-nudge",
+                                                                                     "name":  "user_id",
+                                                                                     "value":  "={{ $(\u0027📝 Preparar Contexto\u0027).item.json.id }}",
+                                                                                     "type":  "number"
+                                                                                 }
+                                                                             ]
+                                                         }
+                                     },
+                      "id":  "set-msg-nudge",
+                      "name":  "📦 Montar Nudge",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       1300,
+                                       160
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"chat_id\": {{ $json.chat_id }},\n  \"text\": {{ JSON.stringify($json.mensagem) }}\n}",
+                                         "options":  {
 
-    "⏰ Segunda 8h": {
-      "main": [
-        [{"node": "🔍 Buscar Ativos c/ Dados", "type": "main", "index": 0}]
-      ]
-    },
-    "🔍 Buscar Ativos c/ Dados": {
-      "main": [
-        [{"node": "Tem ativos?", "type": "main", "index": 0}]
-      ]
-    },
-    "Tem ativos?": {
-      "main": [
-        [{"node": "📝 Calcular Stats", "type": "main", "index": 0}],
-        [{"node": "Nenhum ativo", "type": "main", "index": 0}]
-      ]
-    },
-    "📝 Calcular Stats": {
-      "main": [
-        [{"node": "🤖 IA Gerar Resumo", "type": "main", "index": 0}]
-      ]
-    },
-    "🤖 IA Gerar Resumo": {
-      "main": [
-        [{"node": "📦 Montar Mensagem", "type": "main", "index": 0}]
-      ]
-    },
+                                                     }
+                                     },
+                      "id":  "telegram-nudge",
+                      "name":  "📤 Enviar Nudge",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       1520,
+                                       160
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "executeQuery",
+                                         "query":  "=UPDATE users\nSET last_nudge_at = NOW(),\n    updated_at = NOW()\nWHERE id = {{ Number($(\u0027📦 Montar Nudge\u0027).item.json.user_id) }}\nRETURNING id, last_nudge_at;",
+                                         "options":  {
 
-    "⏰ A cada 2h": {
-      "main": [
-        [{"node": "🔍 Buscar Dados", "type": "main", "index": 0}]
-      ]
-    },
-    "🔍 Buscar Dados": {
-      "main": [
-        [{"node": "🎯 Detectar Milestones", "type": "main", "index": 0}]
-      ]
-    },
-    "🎯 Detectar Milestones": {
-      "main": [
-        [{"node": "Tem milestone?", "type": "main", "index": 0}]
-      ]
-    },
-    "Tem milestone?": {
-      "main": [
-        [{"node": "🔴 Já celebrou?", "type": "main", "index": 0}],
-        [{"node": "Sem milestones", "type": "main", "index": 0}]
-      ]
-    },
-    "🔴 Já celebrou?": {
-      "main": [
-        [{"node": "Ainda não celebrou?", "type": "main", "index": 0}]
-      ]
-    },
-    "Ainda não celebrou?": {
-      "main": [
-        [{"node": "🤖 IA Celebrar", "type": "main", "index": 0}],
-        [{"node": "Já celebrado", "type": "main", "index": 0}]
-      ]
-    },
-    "🤖 IA Celebrar": {
-      "main": [
-        [{"node": "📤 Enviar Celebração", "type": "main", "index": 0}]
-      ]
-    },
-    "📤 Enviar Celebração": {
-      "main": [
-        [{"node": "🔴 Marcar Celebrado", "type": "main", "index": 0}]
-      ]
-    }
-  },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "staticData": null,
-  "tags": [
-    {
-      "name": "FitJourneyAI",
-      "createdAt": "2026-03-25T00:00:00.000Z",
-      "updatedAt": "2026-03-25T00:00:00.000Z"
-    },
-    {
-      "name": "TCC2",
-      "createdAt": "2026-03-25T00:00:00.000Z",
-      "updatedAt": "2026-03-25T00:00:00.000Z"
-    }
-  ],
-  "triggerCount": 3,
-  "pinData": {}
+                                                     }
+                                     },
+                      "id":  "update-nudge",
+                      "name":  "💾 Registrar Nudge",
+                      "type":  "n8n-nodes-base.postgres",
+                      "typeVersion":  2.5,
+                      "position":  [
+                                       1740,
+                                       160
+                                   ],
+                      "credentials":  {
+                                          "postgres":  {
+                                                           "id":  "POSTGRES_CREDENTIAL_ID",
+                                                           "name":  "FitJourneyAI DB"
+                                                       }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+
+                                     },
+                      "id":  "noop-nudge",
+                      "name":  "Nenhum inativo",
+                      "type":  "n8n-nodes-base.noOp",
+                      "typeVersion":  1,
+                      "position":  [
+                                       860,
+                                       300
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "content":  "## Flow 2 - Resumo semanal proativo\n\n**Objetivo:** entregar feedback semanal sem o usuario precisar pedir `/resumo`.\n\n**Como funciona:**\n- Agenda executa toda segunda as 8h.\n- PostgreSQL localiza usuarios ativos com dados recentes.\n- Calcula treinos, minutos, grupo mais treinado, variacao de peso e historico.\n- OpenAI transforma os indicadores em um resumo motivacional.\n- Telegram envia o relatorio semanal.\n\n**Para a evidencia:** crie treinos e pesos nos ultimos 7 dias e execute este ramo para mostrar o caminho verde ate `Enviar Resumo Semanal`.",
+                                         "height":  300,
+                                         "width":  380,
+                                         "color":  6
+                                     },
+                      "id":  "note-flow2",
+                      "name":  "📊 Flow 2 — Relatório Semanal",
+                      "type":  "n8n-nodes-base.stickyNote",
+                      "typeVersion":  1,
+                      "position":  [
+                                       180,
+                                       460
+                                   ],
+                      "notes":  {
+                                    "note":  "## 📊 Relatório Semanal Proativo\n\n**Funcionalidade NOVA que não existe no Java!**\n\n- Toda segunda-feira às 8h\n- Busca usuários ativos com dados na semana\n- Calcula: treinos, variação peso, grupo mais treinado, streak\n- IA gera resumo motivacional personalizado\n- Envia proativamente pelo Telegram\n\n**Valor:** Usuário recebe feedback SEM precisar pedir"
+                                }
+                  },
+                  {
+                      "parameters":  {
+                                         "rule":  {
+                                                      "interval":  [
+                                                                       {
+                                                                           "field":  "cronExpression",
+                                                                           "expression":  "0 8 * * 1"
+                                                                       }
+                                                                   ]
+                                                  }
+                                     },
+                      "id":  "cron-semanal",
+                      "name":  "⏰ Segunda 8h",
+                      "type":  "n8n-nodes-base.scheduleTrigger",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       180,
+                                       600
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "executeQuery",
+                                         "query":  "SELECT\n  u.id, u.telegram_chat_id, u.nome, u.objetivo, u.nivel,\n  u.peso_atual, u.frequencia_treino_estimada,\n  -- Treinos da semana\n  (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id\n   AND w.data_realizacao \u003e NOW() - INTERVAL \u00277 days\u0027) AS treinos_semana,\n  -- Total minutos\n  (SELECT COALESCE(SUM(w.duracao_minutos), 0) FROM workouts w WHERE w.user_id = u.id\n   AND w.data_realizacao \u003e NOW() - INTERVAL \u00277 days\u0027) AS minutos_semana,\n  -- Grupo mais treinado\n  (SELECT w.grupo_muscular FROM workouts w WHERE w.user_id = u.id\n   AND w.data_realizacao \u003e NOW() - INTERVAL \u00277 days\u0027\n   GROUP BY w.grupo_muscular ORDER BY COUNT(*) DESC LIMIT 1) AS grupo_top,\n  -- Peso início da semana\n  (SELECT m.valor FROM measurements m WHERE m.user_id = u.id AND m.tipo = \u0027PESO\u0027\n   AND m.data_registro \u003e NOW() - INTERVAL \u00277 days\u0027\n   ORDER BY m.data_registro ASC LIMIT 1) AS peso_inicio_semana,\n  -- Peso fim da semana\n  (SELECT m.valor FROM measurements m WHERE m.user_id = u.id AND m.tipo = \u0027PESO\u0027\n   AND m.data_registro \u003e NOW() - INTERVAL \u00277 days\u0027\n   ORDER BY m.data_registro DESC LIMIT 1) AS peso_fim_semana,\n  -- Registros de peso na semana\n  (SELECT COUNT(*) FROM measurements m WHERE m.user_id = u.id AND m.tipo = \u0027PESO\u0027\n   AND m.data_registro \u003e NOW() - INTERVAL \u00277 days\u0027) AS registros_peso_semana,\n  -- Total treinos histórico\n  (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id) AS total_treinos_historico\nFROM users u\nWHERE u.onboarding_concluido = true\n  AND u.last_interaction_at \u003e NOW() - INTERVAL \u002714 days\u0027\n  AND (\n    (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id AND w.data_realizacao \u003e NOW() - INTERVAL \u00277 days\u0027) \u003e 0\n    OR\n    (SELECT COUNT(*) FROM measurements m WHERE m.user_id = u.id AND m.data_registro \u003e NOW() - INTERVAL \u00277 days\u0027) \u003e 0\n  )\nORDER BY u.id;",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "query-semanal",
+                      "name":  "🔍 Buscar Ativos c/ Dados",
+                      "type":  "n8n-nodes-base.postgres",
+                      "typeVersion":  2.5,
+                      "position":  [
+                                       420,
+                                       600
+                                   ],
+                      "credentials":  {
+                                          "postgres":  {
+                                                           "id":  "POSTGRES_CREDENTIAL_ID",
+                                                           "name":  "FitJourneyAI DB"
+                                                       }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  2
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "leftValue":  "={{ $json.id }}",
+                                                                                   "rightValue":  "",
+                                                                                   "operator":  {
+                                                                                                    "type":  "number",
+                                                                                                    "operation":  "exists"
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "check-ativos",
+                      "name":  "Tem ativos?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       640,
+                                       600
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const u = $json;\n\nfunction cleanName(value) {\n  return String(value || \u0027amigo(a)\u0027)\n    .replace(/[,.!]+$/g, \u0027\u0027)\n    .replace(/\\s+/g, \u0027 \u0027)\n    .trim() || \u0027amigo(a)\u0027;\n}\n\nfunction goalLabel(value) {\n  const map = {\n    EMAGRECER: \u0027emagrecer\u0027,\n    GANHAR_MUSCULO: \u0027ganhar massa muscular\u0027,\n    MELHORAR_CONDICIONAMENTO: \u0027melhorar condicionamento\u0027,\n    CORRER_5K_10K: \u0027correr 5km/10km\u0027,\n    SAUDE_BEM_ESTAR: \u0027saude e bem-estar\u0027,\n    GANHAR_FORCA: \u0027ganhar forca\u0027\n  };\n  return map[value] || String(value || \u0027manter forma\u0027).toLowerCase().replaceAll(\u0027_\u0027, \u0027 \u0027);\n}\n\nfunction groupLabel(value) {\n  const map = {\n    PEITO: \u0027peito\u0027,\n    COSTAS: \u0027costas\u0027,\n    PERNAS: \u0027pernas\u0027,\n    OMBRO: \u0027ombros\u0027,\n    BRACOS: \u0027bracos\u0027,\n    ABDOMEN: \u0027abdomen\u0027,\n    FULLBODY: \u0027full body\u0027,\n    CARDIO: \u0027cardio\u0027,\n    CORRIDA: \u0027corrida\u0027,\n    OUTRO: \u0027variado\u0027\n  };\n  return map[value] || String(value || \u0027variado\u0027).toLowerCase().replaceAll(\u0027_\u0027, \u0027 \u0027);\n}\n\nfunction decimalPt(value) {\n  return Number(value).toFixed(1).replace(\u0027.\u0027, \u0027,\u0027);\n}\n\nconst nome = cleanName(u.nome);\nconst objetivo = goalLabel(u.objetivo);\nconst treinos = Number(u.treinos_semana || 0);\nconst minutos = Number(u.minutos_semana || 0);\nconst grupoTop = groupLabel(u.grupo_top);\nconst meta = Number(u.frequencia_treino_estimada || 0);\nconst pesoInicio = u.peso_inicio_semana;\nconst pesoFim = u.peso_fim_semana;\nconst totalHistorico = Number(u.total_treinos_historico || 0);\n\nlet pesoDiff = \u0027Sem registros de peso essa semana\u0027;\nif (pesoInicio \u0026\u0026 pesoFim) {\n  const diff = Number(pesoFim) - Number(pesoInicio);\n  const sinal = diff \u003e= 0 ? \u0027+\u0027 : \u0027\u0027;\n  pesoDiff = `Peso: ${decimalPt(pesoInicio)}kg para ${decimalPt(pesoFim)}kg (${sinal}${decimalPt(diff)}kg)`;\n}\n\nlet metaMsg = \u0027Meta semanal nao informada\u0027;\nif (meta \u003e 0) {\n  const pct = Math.round((treinos / meta) * 100);\n  metaMsg = `Meta semanal: ${treinos}/${meta} treinos (${pct}% de cumprimento)`;\n}\n\nlet streakMsg = \u0027\u0027;\nif (treinos \u003e= meta \u0026\u0026 meta \u003e 0) {\n  streakMsg = \u0027Meta atingida\u0027;\n} else if (treinos \u003e= 3) {\n  streakMsg = \u0027Semana produtiva\u0027;\n}\n\nconst prompt = `Gere um resumo semanal motivacional para:\n- Nome limpo: ${nome}\n- Objetivo: ${objetivo}\n- Treinos na semana: ${treinos} (${minutos} minutos total)\n- ${metaMsg}\n- Grupo mais treinado: ${grupoTop}\n- ${pesoDiff}\n- Total de treinos no historico: ${totalHistorico}\n- Status: ${streakMsg}\n\nREGRAS OBRIGATORIAS:\n- Maximo 8 linhas.\n- Comece exatamente com: 📊 Resumo semanal, ${nome}!\n- Nao coloque virgula entre o nome e o ponto de exclamacao.\n- Use somente portugues do Brasil. Nao use palavras ou letras de outros idiomas/alfabetos.\n- Nao use Markdown: nao use **, __, titulos ou listas com marcacao.\n- Use emojis com moderacao (3 a 5 no total).\n- Destaque conquistas primeiro.\n- Sugira melhoria gentilmente.\n- Inclua um ensinamento sobre consistencia.\n- Termine exatamente com: Boa semana! Use /treino para um novo treino ou /progresso para ver graficos`;\n\nreturn {\n  ...u,\n  nome,\n  objetivo_label: objetivo,\n  grupo_top_label: grupoTop,\n  peso_diff_label: pesoDiff,\n  prompt_semanal: prompt\n};"
+                                     },
+                      "id":  "code-contexto-semanal",
+                      "name":  "📝 Calcular Stats",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       860,
+                                       560
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "https://api.openai.com/v1/chat/completions",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "Authorization",
+                                                                                         "value":  "=Bearer {{ $env.OPENAI_API_KEY }}"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Content-Type",
+                                                                                         "value":  "application/json"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"model\": \"gpt-5.4-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Voce e o FitJourneyAI, um coach fitness sabio e motivacional. Escreva somente em portugues do Brasil, usando apenas caracteres latinos comuns. Nao use Markdown. Nao use palavras ou caracteres de outros alfabetos. Seja claro, natural e profissional.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.prompt_semanal) }}\n    }\n  ],\n  \"temperature\": 0.55,\n  \"max_completion_tokens\": 360\n}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "openai-semanal",
+                      "name":  "🤖 IA Gerar Resumo",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       1080,
+                                       560
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "msg-final-semanal",
+                                                                                     "name":  "mensagem",
+                                                                                     "value":  "={{ String($json.choices?.[0]?.message?.content || $json.text || $json.message?.content || \u0027📊 Resumo da semana:\\n\\nTreinos: \u0027 + $(\u0027📝 Calcular Stats\u0027).item.json.treinos_semana + \u0027\\nContinue assim! Use /progresso para ver graficos.\u0027).replace(/\\*\\*/g, \u0027\u0027).replace(/__/g, \u0027\u0027).replace(/,\\s*!/g, \u0027!\u0027).replace(/execu[cç][aã]o/gi, \u0027cumprimento\u0027).replace(/[^\\u000A\\u000D\\u0020-\\u007E\\u00A0-\\u024F\\u1E00-\\u1EFF📊🎯🏋️📉🔥💡💪✅⚖️🚀]/gu, \u0027\u0027).trim() }}",
+                                                                                     "type":  "string"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "chat-id-semanal",
+                                                                                     "name":  "chat_id",
+                                                                                     "value":  "={{ $(\u0027📝 Calcular Stats\u0027).item.json.telegram_chat_id }}",
+                                                                                     "type":  "number"
+                                                                                 }
+                                                                             ]
+                                                         }
+                                     },
+                      "id":  "set-msg-semanal",
+                      "name":  "📦 Montar Resumo Semanal",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       1300,
+                                       560
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"chat_id\": {{ $json.chat_id }},\n  \"text\": {{ JSON.stringify($json.mensagem) }}\n}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "telegram-semanal",
+                      "name":  "📤 Enviar Resumo Semanal",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       1520,
+                                       560
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+
+                                     },
+                      "id":  "noop-semanal",
+                      "name":  "Nenhum ativo",
+                      "type":  "n8n-nodes-base.noOp",
+                      "typeVersion":  1,
+                      "position":  [
+                                       860,
+                                       700
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "content":  "## Flow 3 - Milestones e gamificacao\n\n**Objetivo:** reconhecer conquistas reais e aumentar engajamento.\n\n**Como funciona:**\n- Agenda executa a cada 2h.\n- PostgreSQL calcula total de treinos, peso inicial/atual e dias treinados na semana.\n- O node de codigo detecta marcos: 10, 25, 50, 75, 100+ treinos, peso perdido e streak.\n- Redis verifica se a conquista ja foi celebrada.\n- OpenAI gera a celebracao.\n- Telegram envia a mensagem.\n- Redis marca a conquista por 90 dias.\n\n**Para a evidencia:** rode o seed de n8n para criar streak semanal e limpe as chaves Redis antes de executar.",
+                                         "height":  330,
+                                         "width":  400,
+                                         "color":  3
+                                     },
+                      "id":  "note-flow3",
+                      "name":  "🏆 Flow 3 — Milestones",
+                      "type":  "n8n-nodes-base.stickyNote",
+                      "typeVersion":  1,
+                      "position":  [
+                                       180,
+                                       860
+                                   ],
+                      "notes":  {
+                                    "note":  "## 🏆 Celebração de Milestones\n\n**Funcionalidade NOVA que não existe no Java!**\n\n- Executa a cada 2 horas\n- Detecta conquistas:\n  • 10º, 25º, 50º, 100º treino\n  • 5kg perdidos, 10kg perdidos\n  • 7 dias seguidos treinando (streak)\n- Redis impede celebração duplicada\n- IA gera mensagem especial\n\n**Valor:** Gamificação e retenção"
+                                }
+                  },
+                  {
+                      "parameters":  {
+                                         "rule":  {
+                                                      "interval":  [
+                                                                       {
+                                                                           "field":  "hours",
+                                                                           "hoursInterval":  2
+                                                                       }
+                                                                   ]
+                                                  }
+                                     },
+                      "id":  "cron-milestone",
+                      "name":  "⏰ A cada 2h",
+                      "type":  "n8n-nodes-base.scheduleTrigger",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       180,
+                                       1000
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "executeQuery",
+                                         "query":  "SELECT\n  u.id, u.telegram_chat_id, u.nome, u.objetivo,\n  (SELECT COUNT(*) FROM workouts w WHERE w.user_id = u.id) AS total_treinos,\n  -- Peso mais antigo vs atual\n  (SELECT m.valor FROM measurements m WHERE m.user_id = u.id AND m.tipo = \u0027PESO\u0027\n   ORDER BY m.data_registro ASC LIMIT 1) AS peso_primeiro,\n  u.peso_atual,\n  -- Streak: dias consecutivos com treino na última semana\n  (SELECT COUNT(DISTINCT DATE(w.data_realizacao)) FROM workouts w\n   WHERE w.user_id = u.id AND w.data_realizacao \u003e NOW() - INTERVAL \u00277 days\u0027) AS dias_treino_semana\nFROM users u\nWHERE u.onboarding_concluido = true\n  AND u.last_interaction_at \u003e NOW() - INTERVAL \u002730 days\u0027\nORDER BY u.id;",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "query-milestones",
+                      "name":  "🔍 Buscar Dados",
+                      "type":  "n8n-nodes-base.postgres",
+                      "typeVersion":  2.5,
+                      "position":  [
+                                       420,
+                                       1000
+                                   ],
+                      "credentials":  {
+                                          "postgres":  {
+                                                           "id":  "POSTGRES_CREDENTIAL_ID",
+                                                           "name":  "FitJourneyAI DB"
+                                                       }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const u = $json;\nconst milestones = [];\nconst totalTreinos = u.total_treinos || 0;\nconst pesoInicial = u.peso_primeiro;\nconst pesoAtual = u.peso_atual;\nconst diasTreinoSemana = u.dias_treino_semana || 0;\n\n// Milestone de treinos\nconst treinoMilestones = [10, 25, 50, 75, 100, 150, 200, 500];\nfor (const m of treinoMilestones) {\n  if (totalTreinos === m) {\n    milestones.push({\n      tipo: \u0027treino\u0027,\n      valor: m,\n      key: `milestone:treino:${u.id}:${m}`,\n      descricao: `${m}º treino registrado!`\n    });\n  }\n}\n\n// Milestone de peso perdido\nif (pesoInicial \u0026\u0026 pesoAtual) {\n  const perdido = pesoInicial - pesoAtual;\n  const pesoMilestones = [3, 5, 10, 15, 20];\n  for (const m of pesoMilestones) {\n    if (perdido \u003e= m \u0026\u0026 perdido \u003c m + 1) {\n      milestones.push({\n        tipo: \u0027peso\u0027,\n        valor: m,\n        key: `milestone:peso:${u.id}:${m}`,\n        descricao: `${m}kg perdidos desde o início!`\n      });\n    }\n  }\n}\n\n// Milestone de streak\nif (diasTreinoSemana \u003e= 5) {\n  milestones.push({\n    tipo: \u0027streak\u0027,\n    valor: diasTreinoSemana,\n    key: `milestone:streak:${u.id}:${diasTreinoSemana}`,\n    descricao: `${diasTreinoSemana} dias treinando essa semana!`\n  });\n}\n\nif (milestones.length === 0) {\n  return []; // Nenhum milestone — para o fluxo\n}\n\nreturn milestones.map(m =\u003e ({\n  ...u,\n  milestone: m\n}));"
+                                     },
+                      "id":  "code-detectar-milestones",
+                      "name":  "🎯 Detectar Milestones",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       640,
+                                       1000
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  2
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "leftValue":  "={{ $json.milestone }}",
+                                                                                   "rightValue":  "",
+                                                                                   "operator":  {
+                                                                                                    "type":  "object",
+                                                                                                    "operation":  "exists"
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "check-milestone",
+                      "name":  "Tem milestone?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       860,
+                                       1000
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "get",
+                                         "key":  "={{ $json.milestone.key }}"
+                                     },
+                      "id":  "redis-check-celebrado",
+                      "name":  "🔴 Já celebrou?",
+                      "type":  "n8n-nodes-base.redis",
+                      "typeVersion":  1,
+                      "position":  [
+                                       1080,
+                                       960
+                                   ],
+                      "credentials":  {
+                                          "redis":  {
+                                                        "id":  "REDIS_CREDENTIAL_ID",
+                                                        "name":  "FitJourneyAI Redis"
+                                                    }
+                                      },
+                      "onError":  "continueRegularOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  2
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "leftValue":  "={{ $json.value }}",
+                                                                                   "rightValue":  "",
+                                                                                   "operator":  {
+                                                                                                    "type":  "string",
+                                                                                                    "operation":  "notExists"
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "check-nao-celebrado",
+                      "name":  "Ainda não celebrou?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       1300,
+                                       960
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "https://api.openai.com/v1/chat/completions",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "Authorization",
+                                                                                         "value":  "=Bearer {{ $env.OPENAI_API_KEY }}"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Content-Type",
+                                                                                         "value":  "application/json"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"model\": \"gpt-5.4-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Voce e o FitJourneyAI celebrando uma conquista do usuario. Seja entusiasmado, use emojis e celebre de verdade. Maximo 4 linhas. Portugues do Brasil.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Gere uma mensagem de celebracao para {{ $(\u0027🎯 Detectar Milestones\u0027).item.json.nome || \u0027amigo(a)\u0027 }}!\\n\\nConquista: {{ $(\u0027🎯 Detectar Milestones\u0027).item.json.milestone.descricao }}\\nObjetivo: {{ $(\u0027🎯 Detectar Milestones\u0027).item.json.objetivo || \u0027fitness\u0027 }}\\n\\nCelebre essa conquista e incentive a continuar!\"\n    }\n  ],\n  \"temperature\": 0.95,\n  \"max_completion_tokens\": 200\n}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "openai-milestone",
+                      "name":  "🤖 IA Celebrar",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       1520,
+                                       920
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"chat_id\": {{ $(\u0027🎯 Detectar Milestones\u0027).item.json.telegram_chat_id }},\n  \"text\": {{ JSON.stringify($json.choices?.[0]?.message?.content || $json.text || $json.message?.content || \u0027🏆 Parabens pela conquista!\u0027) }}\n}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "telegram-milestone",
+                      "name":  "📤 Enviar Celebração",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       1740,
+                                       920
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "set",
+                                         "key":  "={{ $(\u0027🎯 Detectar Milestones\u0027).item.json.milestone.key }}",
+                                         "value":  "=celebrated:{{ $now.format(\u0027yyyy-MM-dd\u0027) }}",
+                                         "expire":  true,
+                                         "ttl":  7776000
+                                     },
+                      "id":  "redis-marcar-celebrado",
+                      "name":  "🔴 Marcar Celebrado",
+                      "type":  "n8n-nodes-base.redis",
+                      "typeVersion":  1,
+                      "position":  [
+                                       1960,
+                                       920
+                                   ],
+                      "credentials":  {
+                                          "redis":  {
+                                                        "id":  "REDIS_CREDENTIAL_ID",
+                                                        "name":  "FitJourneyAI Redis"
+                                                    }
+                                      }
+                  },
+                  {
+                      "parameters":  {
+
+                                     },
+                      "id":  "noop-milestone",
+                      "name":  "Sem milestones",
+                      "type":  "n8n-nodes-base.noOp",
+                      "typeVersion":  1,
+                      "position":  [
+                                       1080,
+                                       1100
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+
+                                     },
+                      "id":  "noop-ja-celebrado",
+                      "name":  "Já celebrado",
+                      "type":  "n8n-nodes-base.noOp",
+                      "typeVersion":  1,
+                      "position":  [
+                                       1520,
+                                       1060
+                                   ]
+                  }
+              ],
+    "connections":  {
+                        "⏰ A cada 6h":  {
+                                            "main":  [
+                                                         [
+                                                             {
+                                                                 "node":  "🔍 Buscar Inativos",
+                                                                 "type":  "main",
+                                                                 "index":  0
+                                                             }
+                                                         ]
+                                                     ]
+                                        },
+                        "🔍 Buscar Inativos":  {
+                                                   "main":  [
+                                                                [
+                                                                    {
+                                                                        "node":  "Tem inativos?",
+                                                                        "type":  "main",
+                                                                        "index":  0
+                                                                    }
+                                                                ]
+                                                            ]
+                                               },
+                        "Tem inativos?":  {
+                                              "main":  [
+                                                           [
+                                                               {
+                                                                   "node":  "📝 Preparar Contexto",
+                                                                   "type":  "main",
+                                                                   "index":  0
+                                                               }
+                                                           ],
+                                                           [
+                                                               {
+                                                                   "node":  "Nenhum inativo",
+                                                                   "type":  "main",
+                                                                   "index":  0
+                                                               }
+                                                           ]
+                                                       ]
+                                          },
+                        "📝 Preparar Contexto":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "🤖 IA Gerar Nudge",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "🤖 IA Gerar Nudge":  {
+                                                  "main":  [
+                                                               [
+                                                                   {
+                                                                       "node":  "📦 Montar Nudge",
+                                                                       "type":  "main",
+                                                                       "index":  0
+                                                                   }
+                                                               ]
+                                                           ]
+                                              },
+                        "📦 Montar Nudge":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "📤 Enviar Nudge",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "📤 Enviar Nudge":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "💾 Registrar Nudge",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "⏰ Segunda 8h":  {
+                                             "main":  [
+                                                          [
+                                                              {
+                                                                  "node":  "🔍 Buscar Ativos c/ Dados",
+                                                                  "type":  "main",
+                                                                  "index":  0
+                                                              }
+                                                          ]
+                                                      ]
+                                         },
+                        "🔍 Buscar Ativos c/ Dados":  {
+                                                          "main":  [
+                                                                       [
+                                                                           {
+                                                                               "node":  "Tem ativos?",
+                                                                               "type":  "main",
+                                                                               "index":  0
+                                                                           }
+                                                                       ]
+                                                                   ]
+                                                      },
+                        "Tem ativos?":  {
+                                            "main":  [
+                                                         [
+                                                             {
+                                                                 "node":  "📝 Calcular Stats",
+                                                                 "type":  "main",
+                                                                 "index":  0
+                                                             }
+                                                         ],
+                                                         [
+                                                             {
+                                                                 "node":  "Nenhum ativo",
+                                                                 "type":  "main",
+                                                                 "index":  0
+                                                             }
+                                                         ]
+                                                     ]
+                                        },
+                        "📝 Calcular Stats":  {
+                                                  "main":  [
+                                                               [
+                                                                   {
+                                                                       "node":  "🤖 IA Gerar Resumo",
+                                                                       "type":  "main",
+                                                                       "index":  0
+                                                                   }
+                                                               ]
+                                                           ]
+                                              },
+                        "🤖 IA Gerar Resumo":  {
+                                                   "main":  [
+                                                                [
+                                                                    {
+                                                                        "node":  "📦 Montar Resumo Semanal",
+                                                                        "type":  "main",
+                                                                        "index":  0
+                                                                    }
+                                                                ]
+                                                            ]
+                                               },
+                        "📦 Montar Resumo Semanal":  {
+                                                         "main":  [
+                                                                      [
+                                                                          {
+                                                                              "node":  "📤 Enviar Resumo Semanal",
+                                                                              "type":  "main",
+                                                                              "index":  0
+                                                                          }
+                                                                      ]
+                                                                  ]
+                                                     },
+                        "⏰ A cada 2h":  {
+                                            "main":  [
+                                                         [
+                                                             {
+                                                                 "node":  "🔍 Buscar Dados",
+                                                                 "type":  "main",
+                                                                 "index":  0
+                                                             }
+                                                         ]
+                                                     ]
+                                        },
+                        "🔍 Buscar Dados":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "🎯 Detectar Milestones",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "🎯 Detectar Milestones":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Tem milestone?",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Tem milestone?":  {
+                                               "main":  [
+                                                            [
+                                                                {
+                                                                    "node":  "🔴 Já celebrou?",
+                                                                    "type":  "main",
+                                                                    "index":  0
+                                                                }
+                                                            ],
+                                                            [
+                                                                {
+                                                                    "node":  "Sem milestones",
+                                                                    "type":  "main",
+                                                                    "index":  0
+                                                                }
+                                                            ]
+                                                        ]
+                                           },
+                        "🔴 Já celebrou?":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Ainda não celebrou?",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Ainda não celebrou?":  {
+                                                    "main":  [
+                                                                 [
+                                                                     {
+                                                                         "node":  "🤖 IA Celebrar",
+                                                                         "type":  "main",
+                                                                         "index":  0
+                                                                     }
+                                                                 ],
+                                                                 [
+                                                                     {
+                                                                         "node":  "Já celebrado",
+                                                                         "type":  "main",
+                                                                         "index":  0
+                                                                     }
+                                                                 ]
+                                                             ]
+                                                },
+                        "🤖 IA Celebrar":  {
+                                               "main":  [
+                                                            [
+                                                                {
+                                                                    "node":  "📤 Enviar Celebração",
+                                                                    "type":  "main",
+                                                                    "index":  0
+                                                                }
+                                                            ]
+                                                        ]
+                                           },
+                        "📤 Enviar Celebração":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "🔴 Marcar Celebrado",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 }
+                    },
+    "settings":  {
+                     "executionOrder":  "v1"
+                 },
+    "staticData":  null,
+    "tags":  [
+                 {
+                     "name":  "FitJourneyAI",
+                     "createdAt":  "2026-03-25T00:00:00.000Z",
+                     "updatedAt":  "2026-03-25T00:00:00.000Z"
+                 },
+                 {
+                     "name":  "TCC2",
+                     "createdAt":  "2026-03-25T00:00:00.000Z",
+                     "updatedAt":  "2026-03-25T00:00:00.000Z"
+                 }
+             ],
+    "triggerCount":  3,
+    "pinData":  {
+
+                }
 }

@@ -196,7 +196,7 @@ class OnboardingFlowHandlerTest {
         FlowResult result = handler.handle(buildContext(7, "sim"));
 
         assertThat(result.nextFlow()).isEqualTo(ConversationFlowType.NONE);
-        assertThat(result.responseText()).contains("Seu perfil tá salvo e estamos prontos pra começar!");
+        assertThat(result.responseText()).contains("Seu perfil está salvo e estamos prontos para começar!");
         verify(userRepository).save(any(User.class));
     }
 

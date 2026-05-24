@@ -40,8 +40,9 @@ public class ConfigFlowHandler implements FlowHandler {
     public FlowResult handle(FlowContext context) {
         User user = context.user();
         Integer step = context.state().getCurrentStep();
+        String text = context.rawText();
 
-        if (step == null || step < STEP_CHOOSE_PERSONA) {
+        if (isConfigCommand(text) || step == null || step < STEP_CHOOSE_PERSONA) {
             return showConfigMenu(user);
         }
 
@@ -52,27 +53,35 @@ public class ConfigFlowHandler implements FlowHandler {
         };
     }
 
+    private boolean isConfigCommand(String text) {
+        if (text == null) {
+            return false;
+        }
+        String trimmed = text.trim().toLowerCase();
+        return trimmed.equals("/config") || trimmed.startsWith("/config@");
+    }
+
     private FlowResult showConfigMenu(User user) {
         String currentPersona = user.getPersona() != null ? user.getPersona().getLabel() : "Coach Amigo";
         String currentIntensity = user.getIntensityLevel() != null ? user.getIntensityLevel().getLabel() : "Moderado";
 
         return FlowResult.text(
                 String.format("""
-                        \u2699\uFE0F Configuracoes do FitJourneyAI
+                        ⚙️ Configurações do FitJourneyAI
                         
-                        \uD83C\uDFAD Persona atual: %s
-                        \uD83D\uDD25 Intensidade atual: %s
+                        🎭 Persona atual: %s
+                        🔥 Intensidade atual: %s
                         
                         Escolha sua persona motivacional:
                         
-                        1 - \uD83E\uDD1D Coach Amigo - Seu parceiro de treino
-                        2 - \uD83C\uDFDB Filosofo Estoico - Disciplina e sabedoria
-                        3 - \uD83C\uDF96 Sargento de Treinamento - Sem desculpas
-                        4 - \uD83C\uDFC6 Atleta de Elite - Performance e evolucao
-                        5 - \u2694\uFE0F Monge Guerreiro - Corpo e mente
-                        6 - \uD83E\uDDEC Cientista do Corpo - Dados e evidencias
+                        1 - 🤝 Coach Amigo - Seu parceiro de treino
+                        2 - 🏛 Filósofo Estoico - Disciplina e sabedoria
+                        3 - 🎖 Sargento de Treinamento - Sem desculpas
+                        4 - 🏆 Atleta de Elite - Performance e evolução
+                        5 - ⚔️ Monge Guerreiro - Corpo e mente
+                        6 - 🧬 Cientista do Corpo - Dados e evidências
                         
-                        Manda o numero!""", currentPersona, currentIntensity),
+                        Manda o número!""", currentPersona, currentIntensity),
                 ConversationFlowType.CONFIG,
                 STEP_CHOOSE_PERSONA,
                 Map.of(),
@@ -85,7 +94,7 @@ public class ConfigFlowHandler implements FlowHandler {
 
         if (persona == null) {
             return FlowResult.text(
-                    "Nao entendi. Manda o numero de 1 a 6 pra escolher sua persona!",
+                    "Não entendi. Manda o número de 1 a 6 para escolher sua persona!",
                     ConversationFlowType.CONFIG, STEP_CHOOSE_PERSONA, Map.of(), null
             );
         }
@@ -97,16 +106,16 @@ public class ConfigFlowHandler implements FlowHandler {
 
         return FlowResult.text(
                 String.format("""
-                        \uD83C\uDFAD Persona definida: %s
+                        🎭 Persona definida: %s
                         %s
                         
-                        Agora escolha o nivel de intensidade:
+                        Agora escolha o nível de intensidade:
                         
-                        1 - \uD83C\uDF3F Leve - Motivacao gentil e acolhedora
-                        2 - \u2696\uFE0F Moderado - Equilibrio entre apoio e cobranca
-                        3 - \uD83D\uDD25 Intenso - Cobranca direta e sem desculpas
+                        1 - 🌿 Leve - Motivação gentil e acolhedora
+                        2 - ⚖️ Moderado - Equilíbrio entre apoio e cobrança
+                        3 - 🔥 Intenso - Cobrança direta e sem desculpas
                         
-                        Manda o numero!""", persona.getLabel(), persona.getSubtitle()),
+                        Manda o número!""", persona.getLabel(), persona.getSubtitle()),
                 ConversationFlowType.CONFIG,
                 STEP_CHOOSE_INTENSITY,
                 Map.of("persona", persona.name()),
@@ -119,7 +128,7 @@ public class ConfigFlowHandler implements FlowHandler {
 
         if (intensity == null) {
             return FlowResult.text(
-                    "Nao entendi. Manda 1 (Leve), 2 (Moderado) ou 3 (Intenso)!",
+                    "Não entendi. Manda 1 (Leve), 2 (Moderado) ou 3 (Intenso)!",
                     ConversationFlowType.CONFIG, STEP_CHOOSE_INTENSITY, Map.of(), null
             );
         }
@@ -136,55 +145,55 @@ public class ConfigFlowHandler implements FlowHandler {
 
         return FlowResult.done(
                 String.format("""
-                        \u2705 Configuracao salva!
+                        ✅ Configuração salva!
                         
-                        \uD83C\uDFAD Persona: %s
-                        \uD83D\uDD25 Intensidade: %s
+                        🎭 Persona: %s
+                        🔥 Intensidade: %s
                         
                         %s
                         
-                        A partir de agora, todas as minhas mensagens vao seguir esse estilo!
+                        A partir de agora, todas as minhas mensagens vão seguir esse estilo!
                         
-                        Use /menu pra ver as opcoes ou /treino pra testar sua nova persona!""",
+                        Use /menu para ver as opções ou /treino para testar sua nova persona!""",
                         persona.getLabel(), intensity.getLabel(), preview),
                 "Teste sua persona com /treino ou /peso!"
         );
     }
 
     /**
-     * Gera um preview da combinacao persona + intensidade pra o usuario ver como fica.
+     * Gera um preview da combinação persona + intensidade para o usuário ver como fica.
      */
     private String generatePreview(PersonaType persona, IntensityLevel intensity) {
         return switch (persona) {
             case ESTOICO -> switch (intensity) {
-                case LEVE -> "\uD83D\uDCAC Preview: \"A constancia e a mae de todas as virtudes. Cada treino e um tijolo no templo do seu corpo.\"";
-                case MODERADO -> "\uD83D\uDCAC Preview: \"Nao espere motivacao. A disciplina e o que te leva quando a vontade falta. Treine.\"";
-                case INTENSO -> "\uD83D\uDCAC Preview: \"O sofrimento e inevitavel. Escolha o sofrimento que te constroi. Levante esse peso.\"";
+                case LEVE -> "💬 Preview: \"A constância é a mãe de todas as virtudes. Cada treino é um tijolo no templo do seu corpo.\"";
+                case MODERADO -> "💬 Preview: \"Não espere motivação. A disciplina é o que te leva quando a vontade falta. Treine.\"";
+                case INTENSO -> "💬 Preview: \"O sofrimento é inevitável. Escolha o sofrimento que te constrói. Levante esse peso.\"";
             };
             case DRILL_SERGEANT -> switch (intensity) {
-                case LEVE -> "\uD83D\uDCAC Preview: \"Bom trabalho, soldado. Mas nao relaxe. Amanha tem mais.\"";
-                case MODERADO -> "\uD83D\uDCAC Preview: \"Voce veio aqui pra que? Pra ficar olhando? Bota peso nessa barra!\"";
-                case INTENSO -> "\uD83D\uDCAC Preview: \"Voce vai desistir? Vai perder pra si mesmo? Enquanto voce descansa, alguem esta treinando pra te ultrapassar.\"";
+                case LEVE -> "💬 Preview: \"Bom trabalho, soldado. Mas não relaxe. Amanhã tem mais.\"";
+                case MODERADO -> "💬 Preview: \"Você veio aqui para quê? Para ficar olhando? Bota peso nessa barra!\"";
+                case INTENSO -> "💬 Preview: \"Você vai desistir? Vai perder para si mesmo? Enquanto você descansa, alguém está treinando para te ultrapassar.\"";
             };
             case ATLETA -> switch (intensity) {
-                case LEVE -> "\uD83D\uDCAC Preview: \"Grandes atletas nao nasceram prontos. Cada treino e uma evolucao. Siga firme.\"";
-                case MODERADO -> "\uD83D\uDCAC Preview: \"Performance se constroi nos detalhes. Foco na tecnica, foco na recuperacao. O resultado vem.\"";
-                case INTENSO -> "\uD83D\uDCAC Preview: \"Nenhum campeao foi feito nos dias de folga. Ou voce treina como profissional, ou aceita resultados de amador.\"";
+                case LEVE -> "💬 Preview: \"Grandes atletas não nasceram prontos. Cada treino é uma evolução. Siga firme.\"";
+                case MODERADO -> "💬 Preview: \"Performance se constrói nos detalhes. Foco na técnica, foco na recuperação. O resultado vem.\"";
+                case INTENSO -> "💬 Preview: \"Nenhum campeão foi feito nos dias de folga. Ou você treina como profissional, ou aceita resultados de amador.\"";
             };
             case MONGE_GUERREIRO -> switch (intensity) {
-                case LEVE -> "\uD83D\uDCAC Preview: \"A agua que flui e mais forte que a rocha. Seja constante e o resultado virah.\"";
-                case MODERADO -> "\uD83D\uDCAC Preview: \"O guerreiro nao busca a briga. Ele busca a preparacao. Treine hoje para o desafio de amanha.\"";
-                case INTENSO -> "\uD83D\uDCAC Preview: \"Dor e o mestre que poucos aceitam. Abrace-a. Do outro lado esta a versao que voce quer ser.\"";
+                case LEVE -> "💬 Preview: \"A água que flui é mais forte que a rocha. Seja constante e o resultado virá.\"";
+                case MODERADO -> "💬 Preview: \"O guerreiro não busca a briga. Ele busca a preparação. Treine hoje para o desafio de amanhã.\"";
+                case INTENSO -> "💬 Preview: \"Dor é o mestre que poucos aceitam. Abrace-a. Do outro lado está a versão que você quer ser.\"";
             };
             case CIENTISTA -> switch (intensity) {
-                case LEVE -> "\uD83D\uDCAC Preview: \"Sabia que 30 minutos de treino liberam endorfina equivalente a um comprimido de bom humor? Seu corpo agradece.\"";
-                case MODERADO -> "\uD83D\uDCAC Preview: \"A sintese proteica atinge o pico 24-48h pos-treino. Aproveite essa janela. Treine e alimente-se bem.\"";
-                case INTENSO -> "\uD83D\uDCAC Preview: \"Voce perde 1-3% de forca por semana de inatividade. A atrofia nao espera sua motivacao. Os dados nao mentem.\"";
+                case LEVE -> "💬 Preview: \"Sabia que 30 minutos de treino liberam endorfina equivalente a um comprimido de bom humor? Seu corpo agradece.\"";
+                case MODERADO -> "💬 Preview: \"A síntese proteica atinge o pico 24-48h pós-treino. Aproveite essa janela. Treine e alimente-se bem.\"";
+                case INTENSO -> "💬 Preview: \"Você perde 1-3% de força por semana de inatividade. A atrofia não espera sua motivação. Os dados não mentem.\"";
             };
             default -> switch (intensity) {
-                case LEVE -> "\uD83D\uDCAC Preview: \"Fala, parceiro! Bora treinar? Cada passo conta nessa jornada!\"";
-                case MODERADO -> "\uD83D\uDCAC Preview: \"E ai, bora manter o ritmo? Consistencia e o segredo. Nao precisa ser perfeito, precisa ser constante!\"";
-                case INTENSO -> "\uD83D\uDCAC Preview: \"Voce prometeu pra si mesmo. Vai cumprir ou vai inventar desculpa? Bora, sem mimimi!\"";
+                case LEVE -> "💬 Preview: \"Fala, parceiro! Bora treinar? Cada passo conta nessa jornada!\"";
+                case MODERADO -> "💬 Preview: \"E aí, bora manter o ritmo? Consistência é o segredo. Não precisa ser perfeito, precisa ser constante!\"";
+                case INTENSO -> "💬 Preview: \"Você prometeu para si mesmo. Vai cumprir ou vai inventar desculpa? Bora, sem mimimi!\"";
             };
         };
     }

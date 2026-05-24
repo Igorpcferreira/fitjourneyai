@@ -2,7 +2,9 @@ package br.edu.puc.fitjourneyai.core.flow;
 
 import br.edu.puc.fitjourneyai.core.model.enums.ConversationFlowType;
 
+import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Resultado imutável retornado por cada FlowHandler.
@@ -64,5 +66,41 @@ public record FlowResult(
      */
     public boolean hasImage() {
         return imageData != null && imageData.length > 0;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (!(obj instanceof FlowResult other)) {
+            return false;
+        }
+        return Objects.equals(responseText, other.responseText)
+                && Arrays.equals(imageData, other.imageData)
+                && Objects.equals(imageCaption, other.imageCaption)
+                && nextFlow == other.nextFlow
+                && Objects.equals(nextStep, other.nextStep)
+                && Objects.equals(stateData, other.stateData)
+                && Objects.equals(suggestedNextAction, other.suggestedNextAction);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(responseText, imageCaption, nextFlow, nextStep, stateData, suggestedNextAction);
+        result = 31 * result + Arrays.hashCode(imageData);
+        return result;
+    }
+
+    @Override
+    public String toString() {
+        return "FlowResult[responseText=" + responseText
+                + ", imageData=" + Arrays.toString(imageData)
+                + ", imageCaption=" + imageCaption
+                + ", nextFlow=" + nextFlow
+                + ", nextStep=" + nextStep
+                + ", stateData=" + stateData
+                + ", suggestedNextAction=" + suggestedNextAction
+                + "]";
     }
 }

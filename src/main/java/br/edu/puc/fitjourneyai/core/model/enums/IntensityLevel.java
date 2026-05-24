@@ -1,36 +1,39 @@
 package br.edu.puc.fitjourneyai.core.model.enums;
 
+import java.text.Normalizer;
+import java.util.Locale;
+
 /**
- * Nivel de intensidade/agressividade do tom motivacional.
- * Afeta como a persona se comunica com o usuario.
+ * Nível de intensidade/agressividade do tom motivacional.
+ * Afeta como a persona se comunica com o usuário.
  */
 public enum IntensityLevel {
 
     LEVE(
             "Leve",
-            "Motivacao gentil e acolhedora",
+            "Motivação gentil e acolhedora",
             "Use tom GENTIL e acolhedor. Motive com encorajamento positivo. " +
-            "Nunca pressione ou critique. Celebre pequenas vitorias. " +
-            "Seja compreensivo com falhas e ausencias."
+            "Nunca pressione ou critique. Celebre pequenas vitórias. " +
+            "Seja compreensivo com falhas e ausências."
     ),
 
     MODERADO(
             "Moderado",
-            "Equilibrio entre apoio e cobranca",
-            "Use tom EQUILIBRADO entre apoio e cobranca. " +
-            "Celebre conquistas mas tambem cobre consistencia. " +
-            "Seja direto sem ser agressivo. Aponte areas de melhoria com respeito."
+            "Equilíbrio entre apoio e cobrança",
+            "Use tom EQUILIBRADO entre apoio e cobrança. " +
+            "Celebre conquistas, mas também cobre consistência. " +
+            "Seja direto sem ser agressivo. Aponte áreas de melhoria com respeito."
     ),
 
     INTENSO(
             "Intenso",
-            "Cobranca direta e sem desculpas",
+            "Cobrança direta e sem desculpas",
             "Use tom INTENSO e cobrador. Seja direto e sem rodeios. " +
-            "Nao aceite desculpas facilmente. Desafie o usuario a superar limites. " +
-            "Use frases de impacto. Questione quando o usuario nao esta dando o maximo. " +
-            "Exemplos de frases no nivel maximo: " +
-            "'Voce vai desistir de novo?', 'Seu corpo aguenta, sua mente que e fraca', " +
-            "'Enquanto voce descansa, alguem esta treinando', 'Dor e temporaria, arrependimento e eterno'. " +
+            "Não aceite desculpas facilmente. Desafie o usuário a superar limites. " +
+            "Use frases de impacto. Questione quando o usuário não está dando o máximo. " +
+            "Exemplos de frases no nível máximo: " +
+            "'Você vai desistir de novo?', 'Seu corpo aguenta, sua mente que é fraca', " +
+            "'Enquanto você descansa, alguém está treinando', 'Dor é temporária, arrependimento é eterno'. " +
             "IMPORTANTE: mesmo intenso, nunca seja desrespeitoso, ofensivo ou promova comportamento inseguro."
     );
 
@@ -50,13 +53,30 @@ public enum IntensityLevel {
 
     public static IntensityLevel fromUserInput(String input) {
         if (input == null || input.isBlank()) return null;
-        String normalized = input.trim().toLowerCase();
+        String normalized = normalize(input);
 
-        return switch (normalized) {
-            case "1", "leve", "gentil", "suave" -> LEVE;
-            case "2", "moderado", "medio", "equilibrado" -> MODERADO;
-            case "3", "intenso", "maximo", "hardcore", "pesado" -> INTENSO;
-            default -> null;
-        };
+        if (hasOption(normalized, "1", "um", "leve", "gentil", "suave")) return LEVE;
+        if (hasOption(normalized, "2", "dois", "moderado", "medio", "equilibrado")) return MODERADO;
+        if (hasOption(normalized, "3", "tres", "intenso", "maximo", "hardcore", "pesado")) return INTENSO;
+
+        return null;
+    }
+
+    private static boolean hasOption(String input, String... options) {
+        for (String option : options) {
+            if (input.equals(option) || input.matches(".*\\b" + option + "\\b.*")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalize(String input) {
+        return Normalizer.normalize(input, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9\\s]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }

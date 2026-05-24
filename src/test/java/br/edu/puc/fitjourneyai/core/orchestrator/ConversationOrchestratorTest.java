@@ -49,6 +49,12 @@ class ConversationOrchestratorTest {
     private FlowHandler navigationHandler;
 
     @Mock
+    private FlowHandler configHandler;
+
+    @Mock
+    private FlowHandler contextualHandler;
+
+    @Mock
     private ConversationCacheService cacheService;
 
     private ConversationOrchestrator orchestrator;
@@ -75,10 +81,17 @@ class ConversationOrchestratorTest {
 
         when(onboardingHandler.getFlowType()).thenReturn(ConversationFlowType.ONBOARDING);
         when(navigationHandler.getFlowType()).thenReturn(ConversationFlowType.NAVIGATION);
+        when(configHandler.getFlowType()).thenReturn(ConversationFlowType.CONFIG);
+        when(contextualHandler.getFlowType()).thenReturn(ConversationFlowType.CONTEXTUAL_CONVERSATION);
 
         lenient().when(cacheService.allowRequest(anyLong())).thenReturn(true);
 
-        FlowRegistry registry = new FlowRegistry(List.of(onboardingHandler, navigationHandler));
+        FlowRegistry registry = new FlowRegistry(List.of(
+                onboardingHandler,
+                navigationHandler,
+                configHandler,
+                contextualHandler
+        ));
 
         List<IntentDetector> detectors = List.of(
                 new CommandIntentDetector(),
@@ -199,6 +212,107 @@ class ConversationOrchestratorTest {
 
         verify(onboardingHandler).handle(any());
         verify(navigationHandler, never()).handle(any());
+    }
+
+    @Test
+    @DisplayName("Comando explicito deve interromper fluxo ativo e rotear nova intenção")
+    void comandoExplicitoDeveInterromperFluxoAtivo() {
+        user.setOnboardingConcluido(true);
+        state.setCurrentFlow(ConversationFlowType.ONBOARDING);
+        state.setCurrentStep(2);
+
+        when(userRepository.findByTelegramChatId(12345L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(user);
+        when(stateRepository.findByUserId(1L)).thenReturn(Optional.of(state));
+        when(stateRepository.save(any(ConversationState.class))).thenReturn(state);
+        when(navigationHandler.handle(any())).thenReturn(
+                FlowResult.done("Menu principal", "Use /menu")
+        );
+
+        FlowResult result = orchestrator.handleMessage(12345L, "/menu");
+
+        assertThat(result).isNotNull();
+        assertThat(result.responseText()).contains("Menu");
+
+        verify(navigationHandler).handle(any());
+        verify(onboardingHandler, never()).handle(any());
+    }
+
+    @Test
+    @DisplayName("Frase natural deve sair do fluxo de config e cair na conversa contextual")
+    void fraseNaturalDeveSairDoFluxoConfig() {
+        user.setOnboardingConcluido(true);
+        state.setCurrentFlow(ConversationFlowType.CONFIG);
+        state.setCurrentStep(1);
+
+        when(userRepository.findByTelegramChatId(12345L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(user);
+        when(stateRepository.findByUserId(1L)).thenReturn(Optional.of(state));
+        when(stateRepository.save(any(ConversationState.class))).thenReturn(state);
+        when(contextualHandler.handle(any())).thenReturn(
+                FlowResult.done("Resposta contextual do coach", null)
+        );
+
+        FlowResult result = orchestrator.handleMessage(
+                12345L,
+                "Estou desanimado hoje, mas quero manter constância. Como volto sem exagerar?"
+        );
+
+        assertThat(result).isNotNull();
+        assertThat(result.responseText()).contains("contextual");
+
+        verify(contextualHandler).handle(any());
+        verify(configHandler, never()).handle(any());
+    }
+
+    @Test
+    @DisplayName("Compromisso casual de treino deve ir para conversa contextual")
+    void compromissoCasualDeTreinoDeveIrParaConversaContextual() {
+        user.setOnboardingConcluido(true);
+
+        when(userRepository.findByTelegramChatId(12345L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(user);
+        when(stateRepository.findByUserId(1L)).thenReturn(Optional.of(state));
+        when(stateRepository.save(any(ConversationState.class))).thenReturn(state);
+        when(contextualHandler.handle(any())).thenReturn(
+                FlowResult.done("Resposta contextual do coach", null)
+        );
+
+        FlowResult result = orchestrator.handleMessage(
+                12345L,
+                "Beleza, pode deixar que hoje eu treino sem falta e faço o registro aqui!"
+        );
+
+        assertThat(result).isNotNull();
+        assertThat(result.responseText()).contains("contextual");
+
+        verify(contextualHandler).handle(any());
+        verify(configHandler, never()).handle(any());
+        verify(onboardingHandler, never()).handle(any());
+    }
+
+    @Test
+    @DisplayName("Resposta curta de config deve continuar no fluxo de config")
+    void respostaCurtaDeConfigDeveContinuarNoConfig() {
+        user.setOnboardingConcluido(true);
+        state.setCurrentFlow(ConversationFlowType.CONFIG);
+        state.setCurrentStep(1);
+
+        when(userRepository.findByTelegramChatId(12345L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(user);
+        when(stateRepository.findByUserId(1L)).thenReturn(Optional.of(state));
+        when(stateRepository.save(any(ConversationState.class))).thenReturn(state);
+        when(configHandler.handle(any())).thenReturn(
+                FlowResult.text("Agora escolha a intensidade", ConversationFlowType.CONFIG, 2, Map.of(), null)
+        );
+
+        FlowResult result = orchestrator.handleMessage(12345L, "2");
+
+        assertThat(result).isNotNull();
+        assertThat(result.responseText()).contains("intensidade");
+
+        verify(configHandler).handle(any());
+        verify(contextualHandler, never()).handle(any());
     }
 
     @Test

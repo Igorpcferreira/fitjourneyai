@@ -55,6 +55,17 @@ class AiIntentDetectorTest {
     }
 
     @Test
+    @DisplayName("Nao deve chamar IA para compromisso casual de treino")
+    void naoDeveChamarIaParaCompromissoCasualDeTreino() {
+        Optional<IntentType> result = detector.detect(
+                "Beleza, pode deixar que hoje eu treino sem falta e faço o registro aqui!"
+        );
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(aiService);
+    }
+
+    @Test
     @DisplayName("Deve retornar vazio quando IA retorna UNKNOWN")
     void deveRetornarVazioQuandoIARetornaUnknown() {
         when(aiService.classifyIntent(any(), any())).thenReturn(IntentType.UNKNOWN);

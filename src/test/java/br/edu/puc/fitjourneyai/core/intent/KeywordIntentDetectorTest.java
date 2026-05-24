@@ -41,11 +41,23 @@ class KeywordIntentDetectorTest {
     }
 
     @Test
-    @DisplayName("Deve retornar empty para texto sem keywords")
+    @DisplayName("Deve retornar conversa para reações casuais")
     void deveRetornarEmptyParaTextoSemKeywords() {
-        assertThat(detector.detect("bom dia")).isEmpty();
+        assertThat(detector.detect("bom dia")).contains(IntentType.CONVERSA);
+        assertThat(detector.detect("obrigado")).contains(IntentType.CONVERSA);
+    }
+
+    @Test
+    @DisplayName("Deve retornar empty para texto realmente sem keywords")
+    void deveRetornarEmptyParaTextoRealmenteSemKeywords() {
         assertThat(detector.detect("como vai")).isEmpty();
-        assertThat(detector.detect("obrigado")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Perguntas práticas de execução devem ir para conversa")
+    void perguntasPraticasDevemIrParaConversa() {
+        assertThat(detector.detect("Como faço supino?")).contains(IntentType.CONVERSA);
+        assertThat(detector.detect("Como conseguir correr 5km?")).contains(IntentType.CONVERSA);
     }
 
     @Test

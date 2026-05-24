@@ -43,6 +43,10 @@ public class AiIntentDetector implements IntentDetector {
             return Optional.empty();
         }
 
+        if (isCasualContinuation(text)) {
+            return Optional.empty();
+        }
+
         try {
             String context = "Mensagem avulsa do usuário (sem fluxo ativo)";
             IntentType intent = aiService.classifyIntent(text, context);
@@ -62,5 +66,71 @@ public class AiIntentDetector implements IntentDetector {
 
     private String truncate(String text) {
         return text.length() > 50 ? text.substring(0, 50) + "..." : text;
+    }
+
+    private boolean isCasualContinuation(String text) {
+        String normalized = normalize(text);
+        if (hasExplicitRequest(normalized)) {
+            return false;
+        }
+
+        String[] casualPrefixes = {
+                "beleza", "blz", "ok", "certo", "entendi", "fechou",
+                "combinado", "pode deixar", "show", "perfeito", "boa",
+                "valeu", "obrigado", "obrigada", "tmj"
+        };
+        for (String prefix : casualPrefixes) {
+            if (startsWithToken(normalized, prefix)) {
+                return true;
+            }
+        }
+
+        String[] commitmentPatterns = {
+                "vou treinar", "eu treino", "hoje eu treino", "vou fazer o treino",
+                "vou fazer esse treino", "faco o treino", "farei o treino",
+                "faco o registro", "vou registrar", "farei o registro",
+                "pode deixar que", "sem falta"
+        };
+        for (String pattern : commitmentPatterns) {
+            if (normalized.contains(pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasExplicitRequest(String normalized) {
+        String[] requestMarkers = {
+                "me manda", "manda", "mande", "quero", "queria", "preciso",
+                "monta", "monte", "gera", "gere", "cria", "crie",
+                "me da", "me ajuda", "pode montar", "pode gerar"
+        };
+        for (String marker : requestMarkers) {
+            if (normalized.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean startsWithToken(String text, String token) {
+        if (!text.startsWith(token)) {
+            return false;
+        }
+        if (text.length() == token.length()) {
+            return true;
+        }
+        char next = text.charAt(token.length());
+        return Character.isWhitespace(next) || !Character.isLetterOrDigit(next);
+    }
+
+    private String normalize(String text) {
+        return java.text.Normalizer.normalize(text == null ? "" : text, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9\\s]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }

@@ -75,7 +75,7 @@ class PersonaPromptBuilderTest {
         String prompt = PersonaPromptBuilder.buildPostWorkoutMotivation(user);
 
         assertThat(prompt).isNotBlank();
-        assertThat(prompt).contains("Portugues do Brasil");
+        assertThat(prompt).contains("Português do Brasil");
     }
 
     @Test

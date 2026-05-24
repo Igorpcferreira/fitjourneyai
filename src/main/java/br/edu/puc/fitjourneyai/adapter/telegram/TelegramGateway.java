@@ -3,6 +3,7 @@ package br.edu.puc.fitjourneyai.adapter.telegram;
 import br.edu.puc.fitjourneyai.adapter.telegram.dto.TelegramSendMessageRequest;
 import br.edu.puc.fitjourneyai.config.TelegramProperties;
 import br.edu.puc.fitjourneyai.core.port.MessageGateway;
+import br.edu.puc.fitjourneyai.core.util.TextSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,12 +40,7 @@ public class TelegramGateway implements MessageGateway {
         if (text == null || text.isBlank()) return;
 
         // Converte Markdown da IA para HTML do Telegram
-        String htmlText = markdownToTelegramHtml(text);
-
-        List<String> parts = splitMessage(htmlText, TELEGRAM_MAX_LENGTH);
-        for (String part : parts) {
-            sendSingleMessage(chatId, part, "HTML");
-        }
+        sendChunkedHtmlText(chatId, markdownToTelegramHtml(text));
     }
 
     private void sendSingleMessage(Long chatId, String text, String parseMode) {
@@ -79,8 +75,11 @@ public class TelegramGateway implements MessageGateway {
     @Override
     public void sendHtmlText(Long chatId, String html) {
         if (html == null || html.isBlank()) return;
+        sendChunkedHtmlText(chatId, html);
+    }
 
-        List<String> parts = splitMessage(html, TELEGRAM_MAX_LENGTH);
+    private void sendChunkedHtmlText(Long chatId, String htmlText) {
+        List<String> parts = splitMessage(htmlText, TELEGRAM_MAX_LENGTH);
         for (String part : parts) {
             sendSingleMessage(chatId, part, "HTML");
         }
@@ -160,11 +159,8 @@ public class TelegramGateway implements MessageGateway {
         String result = text;
 
         // Se a IA ja gerou HTML (<b>, <i>), usa direto sem escapar
-        if (result.contains("<b>") || result.contains("<i>") || result.contains("<code>")) {
-            // Remove Markdown residual que a IA pode ter misturado
-            result = result.replaceAll("(?m)^#{1,3}\\s+", "");
-            result = result.replaceAll("(?m)^[-_]{3,}\\s*$", "");
-            return result;
+        if (result.contains("<b>") || result.contains("<i>") || result.contains("<code>") || result.contains("<a ")) {
+            return normalizeMarkdownLines(result, false);
         }
 
         // IA gerou Markdown puro - converte para HTML
@@ -173,14 +169,11 @@ public class TelegramGateway implements MessageGateway {
         result = result.replace("&", "&amp;");
         // NAO escapa < e > aqui pois vamos criar tags
 
-        // 2. Headings Markdown (## Titulo -> negrito)
-        result = result.replaceAll("(?m)^#{1,3}\\s+(.+)$", "<b>$1</b>");
+        // 2. Headings Markdown (## Titulo -> negrito) e remoção de separadores
+        result = normalizeMarkdownLines(result, true);
 
         // 3. **bold** -> <b>bold</b>
-        result = result.replaceAll("\\*\\*(.+?)\\*\\*", "<b>$1</b>");
-
-        // 4. Separadores Markdown (--- ou ___)
-        result = result.replaceAll("(?m)^[-_]{3,}\\s*$", "");
+        result = convertMarkdownBold(result);
 
         return result;
     }
@@ -190,10 +183,84 @@ public class TelegramGateway implements MessageGateway {
      */
     private String stripHtml(String text) {
         if (text == null) return null;
-        return text.replaceAll("<[^>]+>", "")
+        return TextSanitizer.stripHtmlTags(text)
                 .replace("&amp;", "&")
                 .replace("&lt;", "<")
                 .replace("&gt;", ">");
+    }
+
+    private String normalizeMarkdownLines(String text, boolean wrapHeadings) {
+        String[] lines = text.split("\n", -1);
+        StringBuilder out = new StringBuilder(text.length());
+
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmed = line.trim();
+
+            if (!isMarkdownSeparator(trimmed)) {
+                int headingEnd = markdownHeadingPrefixEnd(line);
+                if (headingEnd >= 0) {
+                    String content = line.substring(headingEnd).trim();
+                    out.append(wrapHeadings ? "<b>" + content + "</b>" : content);
+                } else {
+                    out.append(line);
+                }
+            }
+
+            if (i < lines.length - 1) {
+                out.append('\n');
+            }
+        }
+
+        return out.toString();
+    }
+
+    private boolean isMarkdownSeparator(String trimmed) {
+        if (trimmed.length() < 3) {
+            return false;
+        }
+        char first = trimmed.charAt(0);
+        if (first != '-' && first != '_') {
+            return false;
+        }
+        for (int i = 1; i < trimmed.length(); i++) {
+            if (trimmed.charAt(i) != first) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int markdownHeadingPrefixEnd(String line) {
+        int i = 0;
+        while (i < line.length() && i < 3 && line.charAt(i) == '#') {
+            i++;
+        }
+        if (i == 0 || i >= line.length() || !Character.isWhitespace(line.charAt(i))) {
+            return -1;
+        }
+        while (i < line.length() && Character.isWhitespace(line.charAt(i))) {
+            i++;
+        }
+        return i;
+    }
+
+    private String convertMarkdownBold(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        boolean boldOpen = false;
+
+        for (int i = 0; i < text.length(); i++) {
+            if (i + 1 < text.length() && text.charAt(i) == '*' && text.charAt(i + 1) == '*') {
+                out.append(boldOpen ? "</b>" : "<b>");
+                boldOpen = !boldOpen;
+                i++;
+                continue;
+            }
+            out.append(text.charAt(i));
+        }
+
+
+        return out.toString();
     }
 
     // ========================================================================
